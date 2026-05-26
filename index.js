@@ -1,7 +1,6 @@
 require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
-const crypto = require("crypto");
 const { v4: uuidv4 } = require("uuid");
 const { Pool } = require("pg");
 
@@ -11,14 +10,11 @@ const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
 app.use(express.urlencoded({ extended: true }));
 
-// ─── Credenciais da Last.fm ───────────────────────────────────────────────────
-const LASTFM_API_KEY = process.env.LASTFM_API_KEY;
-const LASTFM_SECRET = process.env.LASTFM_SECRET;
-const LASTFM_API = "https://ws.audioscrobbler.com/2.0/";
-
-// ─── Credenciais do Spotify (apenas para busca publica) ───────────────────────
-const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
-const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
+// ─── Credenciais do Spotify ───────────────────────────────────────────────────
+const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
+const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
+const REDIRECT_URI = process.env.REDIRECT_URI || `${BASE_URL}/callback`;
+const SPOTIFY_SCOPES = "user-read-currently-playing user-read-playback-state";
 
 // ─── Formato padrao do comando ────────────────────────────────────────────────
 const DEFAULT_FORMAT = "Tocando agora: {nome} - {artista} | {link}";
@@ -28,23 +24,20 @@ const T = {
   pt: {
     pageTitle: 'Comando "Tocando Agora"',
     heroTitle: '🎵 Comando "Tocando Agora"',
-    heroSubtitle: "Siga os passos abaixo para liberar o comando que mostra a música que você está ouvindo na live.",
-    step1Title: "Criar conta na Last.fm",
-    step1Text: "Acesse o site da Last.fm e crie uma conta gratuita (pode usar e-mail ou login com Google).",
-    step1Link: "➜ Criar conta na Last.fm",
-    step2Title: "Confirmar o e-mail",
-    step2Text: "A Last.fm envia um e-mail de confirmação. Abra sua caixa de entrada e clique no link para ativar a conta. Verifique também a pasta de spam.",
-    step2Resend: "<strong>Não chegou em até 1 minuto?</strong> Solicite o reenvio da confirmação:",
-    step2ResendLink: "➜ Reenviar e-mail de confirmação",
-    step2Note: "Você precisa estar logado na Last.fm para reenviar. Aguarde mais alguns minutos e cheque a pasta de spam novamente.",
-    step3Title: "Conectar o Spotify à Last.fm",
-    step3Text: "Isso faz a Last.fm registrar tudo que você ouve no Spotify. Acesse as configurações de aplicativos da Last.fm, encontre o Spotify e clique em conectar.",
-    step3Link: "➜ Abrir configurações de aplicativos da Last.fm",
-    step3Note: "⚠️ Sem esse passo o comando não funciona, pois a Last.fm não saberá o que você está ouvindo.",
-    step4Title: "Autorizar e gerar o comando",
-    step4Text: "Com a conta criada e o Spotify conectado, clique no botão abaixo para autorizar e receber o link do seu comando.",
-    authButton: "✅ Autorizar Spotify (via Last.fm)",
-    authFooter: "Já tem conta na Last.fm com o Spotify conectado? É só clicar no botão acima.",
+    heroSubtitle: "Conecte sua conta do Spotify e use o comando na sua live para mostrar a música que está tocando.",
+    step1Title: "Tenha uma conta no Spotify",
+    step1Text: "Se você ainda não tem, crie uma conta gratuita no Spotify. Funciona com conta Free ou Premium.",
+    step1Link: "➜ Criar conta no Spotify",
+    step2Title: "Autorize o acesso",
+    step2Text: "Clique no botão abaixo. Você será redirecionado para o Spotify para autorizar este aplicativo a ler somente a música que está tocando agora. Não temos acesso a senhas, playlists, biblioteca ou dados pessoais.",
+    step3Title: "Use o link na sua live",
+    step3Text: "Após autorizar, você receberá um link único para colocar no seu bot (Nightbot, StreamElements, etc.). O comando vai mostrar em tempo real a música que está tocando.",
+    authButton: "✅ Autorizar com Spotify",
+    authFooter: "A autorização é segura e segue o padrão OAuth oficial do Spotify.",
+    legalAgree: "Ao continuar você aceita os",
+    legalTerms: "Termos de Uso",
+    legalAnd: "e a",
+    legalPrivacy: "Política de Privacidade",
     fmtTitle: "🎵 Escolha o formato do comando",
     fmtAccount: "Conta",
     fmtPresets: "Formatos prontos (clique para usar):",
@@ -68,23 +61,20 @@ const T = {
   en: {
     pageTitle: '"Now Playing" Command',
     heroTitle: '🎵 "Now Playing" Command',
-    heroSubtitle: "Follow the steps below to set up the command that shows the song you are listening to on stream.",
-    step1Title: "Create a Last.fm account",
-    step1Text: "Go to the Last.fm website and create a free account (you can use e-mail or sign in with Google).",
-    step1Link: "➜ Create a Last.fm account",
-    step2Title: "Confirm your e-mail",
-    step2Text: "Last.fm sends a confirmation e-mail. Open your inbox and click the link to activate the account. Also check your spam folder.",
-    step2Resend: "<strong>Didn't arrive within 1 minute?</strong> Request the confirmation again:",
-    step2ResendLink: "➜ Resend confirmation e-mail",
-    step2Note: "You need to be logged in to Last.fm to resend. Wait a few more minutes and check your spam folder again.",
-    step3Title: "Connect Spotify to Last.fm",
-    step3Text: "This lets Last.fm track everything you listen to on Spotify. Open Last.fm's applications settings, find Spotify and click connect.",
-    step3Link: "➜ Open Last.fm applications settings",
-    step3Note: "⚠️ Without this step the command won't work, because Last.fm won't know what you are listening to.",
-    step4Title: "Authorize and generate the command",
-    step4Text: "With the account created and Spotify connected, click the button below to authorize and get your command link.",
-    authButton: "✅ Authorize Spotify (via Last.fm)",
-    authFooter: "Already have a Last.fm account with Spotify connected? Just click the button above.",
+    heroSubtitle: "Connect your Spotify account and use the command on your stream to show the song currently playing.",
+    step1Title: "Have a Spotify account",
+    step1Text: "If you don't have one yet, create a free Spotify account. It works with Free or Premium accounts.",
+    step1Link: "➜ Create a Spotify account",
+    step2Title: "Authorize access",
+    step2Text: "Click the button below. You will be redirected to Spotify to authorize this application to read only the song that is currently playing. We do not have access to passwords, playlists, library or personal data.",
+    step3Title: "Use the link on your stream",
+    step3Text: "After authorizing, you will get a unique link to use on your bot (Nightbot, StreamElements, etc.). The command will show the song that is playing in real time.",
+    authButton: "✅ Authorize with Spotify",
+    authFooter: "Authorization is secure and follows Spotify's official OAuth standard.",
+    legalAgree: "By continuing you accept the",
+    legalTerms: "Terms of Use",
+    legalAnd: "and the",
+    legalPrivacy: "Privacy Policy",
     fmtTitle: "🎵 Choose the command format",
     fmtAccount: "Account",
     fmtPresets: "Ready-made formats (click to use):",
@@ -107,7 +97,6 @@ const T = {
   },
 };
 
-// Resolve o idioma a partir da query (?lang=). Padrao: pt
 function getLang(req) {
   const lang = (req.query.lang || "").toLowerCase();
   return lang === "en" ? "en" : "pt";
@@ -121,95 +110,66 @@ const pool = new Pool({
 
 async function initDB() {
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS lastfm_users (
-      lastfm_user   TEXT PRIMARY KEY,
+    CREATE TABLE IF NOT EXISTS spotify_users (
+      spotify_id    TEXT PRIMARY KEY,
       command_id    TEXT UNIQUE NOT NULL,
-      session_key   TEXT,
+      access_token  TEXT,
+      refresh_token TEXT,
       format        TEXT,
       created_at    TIMESTAMP DEFAULT NOW()
     )
   `);
   await pool.query(`
-    ALTER TABLE lastfm_users
+    ALTER TABLE spotify_users
     ADD COLUMN IF NOT EXISTS format TEXT
   `).catch(() => {});
   console.log("Banco de dados pronto.");
 }
 
-async function getUserByLastfm(lastfmUser) {
-  const res = await pool.query("SELECT * FROM lastfm_users WHERE lastfm_user = $1", [lastfmUser]);
+async function getUserBySpotifyId(spotifyId) {
+  const res = await pool.query("SELECT * FROM spotify_users WHERE spotify_id = $1", [spotifyId]);
   return res.rows[0] || null;
 }
 
 async function getUserByCommandId(commandId) {
-  const res = await pool.query("SELECT * FROM lastfm_users WHERE command_id = $1", [commandId]);
+  const res = await pool.query("SELECT * FROM spotify_users WHERE command_id = $1", [commandId]);
   return res.rows[0] || null;
 }
 
-async function saveUser(lastfmUser, commandId, sessionKey) {
+async function saveUser(spotifyId, commandId, accessToken, refreshToken) {
   await pool.query(`
-    INSERT INTO lastfm_users (lastfm_user, command_id, session_key)
-    VALUES ($1, $2, $3)
-    ON CONFLICT (lastfm_user) DO UPDATE
-    SET session_key = $3
-  `, [lastfmUser, commandId, sessionKey]);
+    INSERT INTO spotify_users (spotify_id, command_id, access_token, refresh_token)
+    VALUES ($1, $2, $3, $4)
+    ON CONFLICT (spotify_id) DO UPDATE
+    SET access_token = $3, refresh_token = $4
+  `, [spotifyId, commandId, accessToken, refreshToken]);
+}
+
+async function updateAccessToken(spotifyId, accessToken) {
+  await pool.query("UPDATE spotify_users SET access_token = $1 WHERE spotify_id = $2", [accessToken, spotifyId]);
 }
 
 async function saveFormat(commandId, format) {
-  await pool.query("UPDATE lastfm_users SET format = $1 WHERE command_id = $2", [format, commandId]);
+  await pool.query("UPDATE spotify_users SET format = $1 WHERE command_id = $2", [format, commandId]);
 }
 
-// ─── Assinatura de chamadas da Last.fm ────────────────────────────────────────
-function signRequest(params) {
-  const sorted = Object.keys(params).sort();
-  let signString = "";
-  for (const key of sorted) {
-    signString += key + params[key];
-  }
-  signString += LASTFM_SECRET;
-  return crypto.createHash("md5").update(signString, "utf8").digest("hex");
-}
-
-// ─── Token do Spotify (Client Credentials) ────────────────────────────────────
-let spotifyToken = null;
-let spotifyTokenExpiry = 0;
-
-async function getSpotifyToken() {
-  if (spotifyToken && Date.now() < spotifyTokenExpiry) {
-    return spotifyToken;
-  }
-  const auth = Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString("base64");
+// ─── Refresh do token ─────────────────────────────────────────────────────────
+async function refreshAccessToken(spotifyId, refreshToken) {
   const res = await axios.post(
     "https://accounts.spotify.com/api/token",
-    new URLSearchParams({ grant_type: "client_credentials" }),
-    {
-      headers: {
-        Authorization: `Basic ${auth}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-    }
+    new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+    }),
+    { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
   );
-  spotifyToken = res.data.access_token;
-  spotifyTokenExpiry = Date.now() + (res.data.expires_in - 60) * 1000;
-  return spotifyToken;
+  await updateAccessToken(spotifyId, res.data.access_token);
+  return res.data.access_token;
 }
 
-async function getSpotifyLink(trackName, artistName) {
-  try {
-    const token = await getSpotifyToken();
-    const query = `track:${trackName} artist:${artistName}`;
-    const res = await axios.get("https://api.spotify.com/v1/search", {
-      headers: { Authorization: `Bearer ${token}` },
-      params: { q: query, type: "track", limit: 1 },
-    });
-    const track = res.data.tracks?.items?.[0];
-    return track ? track.external_urls.spotify : null;
-  } catch (err) {
-    console.error("Erro na busca do Spotify:", err.response?.data || err.message);
-    return null;
-  }
-}
-
+// ─── Aplica o formato escolhido pelo usuario ──────────────────────────────────
 function applyFormat(format, data) {
   return (format || DEFAULT_FORMAT)
     .replace(/{nome}/g, data.nome)
@@ -217,12 +177,41 @@ function applyFormat(format, data) {
     .replace(/{link}/g, data.link);
 }
 
+// ─── Buscar musica atual no Spotify ───────────────────────────────────────────
+async function fetchCurrentTrack(token) {
+  const playing = await axios.get(
+    "https://api.spotify.com/v1/me/player/currently-playing",
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+
+  if (!playing.data || playing.status === 204 || !playing.data.item || !playing.data.is_playing) {
+    return null;
+  }
+
+  const item = playing.data.item;
+
+  // Suporte a podcasts
+  if (playing.data.currently_playing_type === "episode") {
+    return {
+      nome: item.name,
+      artista: item.show?.name || "",
+      link: item.external_urls.spotify,
+    };
+  }
+
+  return {
+    nome: item.name,
+    artista: item.artists.map((a) => a.name).join(", "),
+    link: item.external_urls.spotify,
+  };
+}
+
 // ─── Componente: botao de troca de idioma ─────────────────────────────────────
 function langSwitcher(currentPath, lang) {
   const ptActive = lang === "pt";
   const style = (active) =>
     `padding:6px 14px;border-radius:20px;text-decoration:none;font-size:13px;font-weight:bold;` +
-    (active ? "background:#1DB954;color:#000;" : "background:#333;color:#fff;");
+    (active ? "background:#1ed760;color:#000;" : "background:#333;color:#fff;");
   return `
     <div style="text-align:right;margin-bottom:10px;">
       <a href="${currentPath}?lang=pt" style="${style(ptActive)}">PT</a>
@@ -235,8 +224,18 @@ function langSwitcher(currentPath, lang) {
 app.get("/register", (req, res) => {
   const lang = getLang(req);
   const t = T[lang];
-  const callbackUrl = `${BASE_URL}/callback?lang=${lang}`;
-  const authUrl = `https://www.last.fm/api/auth/?api_key=${LASTFM_API_KEY}&cb=${encodeURIComponent(callbackUrl)}`;
+
+  // O state carrega o idioma para preservar no callback
+  const state = encodeURIComponent(JSON.stringify({ lang, nonce: uuidv4().slice(0, 8) }));
+
+  const authUrl =
+    `https://accounts.spotify.com/authorize?` +
+    `client_id=${CLIENT_ID}` +
+    `&response_type=code` +
+    `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+    `&scope=${encodeURIComponent(SPOTIFY_SCOPES)}` +
+    `&state=${state}` +
+    `&show_dialog=true`;
 
   res.send(`
     <html>
@@ -255,53 +254,45 @@ app.get("/register", (req, res) => {
 
           <div style="background:#282828;border-radius:12px;padding:20px;margin-bottom:16px;">
             <h3 style="margin:0 0 8px;">
-              <span style="background:#d51007;border-radius:50%;padding:2px 10px;margin-right:8px;">1</span>
+              <span style="background:#1ed760;border-radius:50%;padding:2px 10px;margin-right:8px;color:#000;">1</span>
               ${t.step1Title}
             </h3>
             <p style="color:#bbb;font-size:14px;margin:8px 0;">${t.step1Text}</p>
-            <a href="https://www.last.fm/join" target="_blank"
-              style="color:#d51007;font-size:14px;font-weight:bold;text-decoration:none;">${t.step1Link}</a>
+            <a href="https://www.spotify.com/signup" target="_blank"
+              style="color:#1ed760;font-size:14px;font-weight:bold;text-decoration:none;">${t.step1Link}</a>
           </div>
 
           <div style="background:#282828;border-radius:12px;padding:20px;margin-bottom:16px;">
             <h3 style="margin:0 0 8px;">
-              <span style="background:#d51007;border-radius:50%;padding:2px 10px;margin-right:8px;">2</span>
+              <span style="background:#1ed760;border-radius:50%;padding:2px 10px;margin-right:8px;color:#000;">2</span>
               ${t.step2Title}
             </h3>
             <p style="color:#bbb;font-size:14px;margin:8px 0;">${t.step2Text}</p>
-            <p style="color:#bbb;font-size:14px;margin:8px 0;">${t.step2Resend}</p>
-            <a href="https://www.last.fm/settings/sendverification" target="_blank"
-              style="color:#d51007;font-size:14px;font-weight:bold;text-decoration:none;">${t.step2ResendLink}</a>
-            <p style="color:#777;font-size:12px;margin-top:10px;">${t.step2Note}</p>
-          </div>
-
-          <div style="background:#282828;border-radius:12px;padding:20px;margin-bottom:16px;">
-            <h3 style="margin:0 0 8px;">
-              <span style="background:#d51007;border-radius:50%;padding:2px 10px;margin-right:8px;">3</span>
-              ${t.step3Title}
-            </h3>
-            <p style="color:#bbb;font-size:14px;margin:8px 0;">${t.step3Text}</p>
-            <a href="https://www.last.fm/settings/applications" target="_blank"
-              style="color:#d51007;font-size:14px;font-weight:bold;text-decoration:none;">${t.step3Link}</a>
-            <p style="color:#777;font-size:12px;margin-top:10px;">${t.step3Note}</p>
           </div>
 
           <div style="background:#282828;border-radius:12px;padding:20px;margin-bottom:28px;">
             <h3 style="margin:0 0 8px;">
-              <span style="background:#1DB954;border-radius:50%;padding:2px 10px;margin-right:8px;color:#000;">4</span>
-              ${t.step4Title}
+              <span style="background:#1ed760;border-radius:50%;padding:2px 10px;margin-right:8px;color:#000;">3</span>
+              ${t.step3Title}
             </h3>
-            <p style="color:#bbb;font-size:14px;margin:8px 0;">${t.step4Text}</p>
+            <p style="color:#bbb;font-size:14px;margin:8px 0;">${t.step3Text}</p>
           </div>
 
           <div style="text-align:center;">
             <a href="${authUrl}"
-              style="background:#d51007;color:#fff;padding:16px 36px;border-radius:30px;text-decoration:none;font-weight:bold;font-size:17px;display:inline-block;">
+              style="background:#1ed760;color:#000;padding:16px 36px;border-radius:30px;text-decoration:none;font-weight:bold;font-size:17px;display:inline-block;">
               ${t.authButton}
             </a>
           </div>
 
           <p style="color:#777;font-size:12px;text-align:center;margin-top:24px;">${t.authFooter}</p>
+
+          <p style="color:#666;font-size:11px;text-align:center;margin-top:30px;">
+            ${t.legalAgree}
+            <a href="${BASE_URL}/terms?lang=${lang}" style="color:#999;text-decoration:underline;">${t.legalTerms}</a>
+            ${t.legalAnd}
+            <a href="${BASE_URL}/privacy?lang=${lang}" style="color:#999;text-decoration:underline;">${t.legalPrivacy}</a>.
+          </p>
 
         </div>
       </body>
@@ -309,43 +300,52 @@ app.get("/register", (req, res) => {
   `);
 });
 
-// ─── ROTA 2: Callback da Last.fm ──────────────────────────────────────────────
+// ─── ROTA 2: Callback do Spotify ──────────────────────────────────────────────
 app.get("/callback", async (req, res) => {
-  const lang = getLang(req);
-  const { token } = req.query;
+  const { code, state } = req.query;
 
-  if (!token) return res.send("Autorizacao negada.");
+  // Tenta recuperar o idioma do state
+  let lang = "pt";
+  try {
+    const parsed = JSON.parse(decodeURIComponent(state || ""));
+    if (parsed.lang === "en") lang = "en";
+  } catch {}
+
+  if (!code) return res.send("Autorização negada.");
 
   try {
-    const params = {
-      method: "auth.getSession",
-      api_key: LASTFM_API_KEY,
-      token: token,
-    };
-    const api_sig = signRequest(params);
+    const tokenRes = await axios.post(
+      "https://accounts.spotify.com/api/token",
+      new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: REDIRECT_URI,
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+      }),
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+    );
 
-    const sessionRes = await axios.get(LASTFM_API, {
-      params: { ...params, api_sig, format: "json" },
+    const accessToken = tokenRes.data.access_token;
+    const refreshToken = tokenRes.data.refresh_token;
+
+    // Pega o ID real do usuario para nao gerar tokens duplicados
+    const profileRes = await axios.get("https://api.spotify.com/v1/me", {
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
 
-    const session = sessionRes.data.session;
-    if (!session) {
-      return res.send("Erro ao criar sessao na Last.fm.");
-    }
+    const spotifyId = profileRes.data.id;
 
-    const lastfmUser = session.name;
-    const sessionKey = session.key;
-
-    const existing = await getUserByLastfm(lastfmUser);
+    const existing = await getUserBySpotifyId(spotifyId);
     const commandId = existing ? existing.command_id : uuidv4().replace(/-/g, "").slice(0, 12);
 
-    await saveUser(lastfmUser, commandId, sessionKey);
+    await saveUser(spotifyId, commandId, accessToken, refreshToken);
 
     res.redirect(`${BASE_URL}/formato/${commandId}?lang=${lang}`);
   } catch (err) {
     const detail = err.response?.data || err.message;
     console.error("Erro no callback:", JSON.stringify(detail));
-    res.send(`Erro ao obter sessao: ${JSON.stringify(detail)}`);
+    res.send(`Erro ao obter token: ${JSON.stringify(detail)}`);
   }
 });
 
@@ -369,19 +369,17 @@ app.get("/formato/:commandId", async (req, res) => {
           ${langSwitcher(`${BASE_URL}/formato/${commandId}`, lang)}
 
           <h2 style="text-align:center;">${t.fmtTitle}</h2>
-          <p style="color:#aaa;text-align:center;">${t.fmtAccount}: <strong>${user.lastfm_user}</strong></p>
+          <p style="color:#aaa;text-align:center;">${t.fmtAccount}: <strong>${user.spotify_id}</strong></p>
 
           <form method="POST" action="${BASE_URL}/formato/${commandId}?lang=${lang}">
             <p style="color:#aaa;font-size:14px;margin-top:30px;">${t.fmtPresets}</p>
 
             ${t.presets.map((preset) => {
-              // Monta o exemplo aplicando dados ficticios ao formato
               const exemplo = applyFormat(preset, {
                 nome: "Blinding Lights",
                 artista: "The Weeknd",
                 link: "link",
               });
-              // Escapa aspas para uso seguro no atributo data
               const safePreset = preset.replace(/"/g, "&quot;");
               return `
             <div class="preset-option" data-format="${safePreset}"
@@ -397,21 +395,19 @@ app.get("/formato/:commandId", async (req, res) => {
               ${t.fmtPlaceholders} <code>{nome}</code> <code>{artista}</code> <code>{link}</code>
             </p>
 
-            <button type="submit" style="background:#1DB954;color:#000;padding:14px 28px;border:none;border-radius:30px;font-weight:bold;font-size:15px;cursor:pointer;margin-top:20px;width:100%;">
+            <button type="submit" style="background:#1ed760;color:#000;padding:14px 28px;border:none;border-radius:30px;font-weight:bold;font-size:15px;cursor:pointer;margin-top:20px;width:100%;">
               ${t.fmtSave}
             </button>
           </form>
 
           <script>
-            // Ao clicar num formato pronto, preenche o campo personalizado
             document.querySelectorAll(".preset-option").forEach(function (el) {
               el.addEventListener("click", function () {
                 document.getElementById("customFormat").value = el.getAttribute("data-format");
-                // Destaca visualmente o selecionado
                 document.querySelectorAll(".preset-option").forEach(function (o) {
                   o.style.outline = "none";
                 });
-                el.style.outline = "2px solid #1DB954";
+                el.style.outline = "2px solid #1ed760";
               });
             });
           </script>
@@ -431,7 +427,6 @@ app.post("/formato/:commandId", async (req, res) => {
 
   if (!user) return res.send(t.invalidId);
 
-  // O comando usa sempre o que estiver no campo personalizado
   const format = (req.body.custom_format || "").trim() || DEFAULT_FORMAT;
 
   await saveFormat(commandId, format);
@@ -463,42 +458,12 @@ app.post("/formato/:commandId", async (req, res) => {
           <p style="color:#aaa;font-size:13px;">StreamElements:</p>
           <code style="background:#222;padding:8px 16px;border-radius:6px;display:inline-block;">${"${customapi." + BASE_URL + "/musica/" + commandId + "}"}</code>
           <br><br>
-          <a href="${BASE_URL}/formato/${commandId}?lang=${lang}" style="color:#1DB954;font-size:13px;">${t.okChangeAgain}</a>
+          <a href="${BASE_URL}/formato/${commandId}?lang=${lang}" style="color:#1ed760;font-size:13px;">${t.okChangeAgain}</a>
         </div>
       </body>
     </html>
   `);
 });
-
-// ─── Buscar musica atual (user.getRecentTracks) ───────────────────────────────
-async function fetchNowPlaying(lastfmUser, format) {
-  const res = await axios.get(LASTFM_API, {
-    params: {
-      method: "user.getRecentTracks",
-      user: lastfmUser,
-      api_key: LASTFM_API_KEY,
-      format: "json",
-      limit: 1,
-    },
-  });
-
-  const tracks = res.data.recenttracks?.track;
-  if (!tracks || tracks.length === 0) return null;
-
-  const track = Array.isArray(tracks) ? tracks[0] : tracks;
-
-  const isNowPlaying = track["@attr"] && track["@attr"].nowplaying === "true";
-  if (!isNowPlaying) return null;
-
-  const nome = track.name;
-  const artista = track.artist["#text"] || track.artist.name;
-  const lastfmUrl = track.url;
-
-  const spotifyLink = await getSpotifyLink(nome, artista);
-  const link = spotifyLink || lastfmUrl;
-
-  return applyFormat(format, { nome, artista, link });
-}
 
 // ─── ROTA 5: Musica atual ─────────────────────────────────────────────────────
 app.get("/musica/:commandId", async (req, res) => {
@@ -507,18 +472,177 @@ app.get("/musica/:commandId", async (req, res) => {
   const { commandId } = req.params;
   const user = await getUserByCommandId(commandId);
 
-  if (!user) {
+  if (!user || !user.access_token) {
     return res.send(t.invalidId);
   }
 
+  async function tryFetch(token) {
+    const data = await fetchCurrentTrack(token);
+    if (!data) return null;
+    return applyFormat(user.format, data);
+  }
+
   try {
-    const result = await fetchNowPlaying(user.lastfm_user, user.format);
+    const result = await tryFetch(user.access_token);
     if (!result) return res.send(t.nothingPlaying);
     res.send(result);
   } catch (err) {
+    if (err.response?.status === 401) {
+      try {
+        const newToken = await refreshAccessToken(user.spotify_id, user.refresh_token);
+        const result = await tryFetch(newToken);
+        if (!result) return res.send(t.nothingPlaying);
+        return res.send(result);
+      } catch (refreshErr) {
+        console.error("Erro ao renovar token:", refreshErr.message);
+        return res.send(t.errorFetch);
+      }
+    }
     console.error(err.response?.data || err.message);
     res.send(t.errorFetch);
   }
+});
+
+// ─── Documentos legais ────────────────────────────────────────────────────────
+const LEGAL = {
+  terms: {
+    pt: {
+      title: "Termos de Uso",
+      updated: "Última atualização: 26 de maio de 2026",
+      sections: [
+        { h: "1. Sobre este serviço", p: "Este site oferece um comando para lives chamado <strong>Now Playing</strong>, que exibe a música que o streamer está ouvindo no Spotify. Ao usar este site você concorda com estes Termos de Uso. Se não concordar, não utilize o serviço." },
+        { h: "2. Como funciona", p: "Você autoriza este site a ler apenas a música que está tocando agora na sua conta Spotify (escopos <code>user-read-currently-playing</code> e <code>user-read-playback-state</code>). Não temos acesso a senhas, playlists, biblioteca, e-mail ou dados financeiros." },
+        { h: "3. Uso permitido", p: "É permitido o uso pessoal e não comercial. Você não pode revender, redistribuir, fazer engenharia reversa ou tentar contornar mecanismos de segurança do site." },
+        { h: "4. Serviços de terceiros", p: "Este site usa a API do <strong>Spotify</strong>. Não somos donos nem controlamos o Spotify. Indisponibilidades, mudanças ou limitações impostas pelo Spotify estão fora do nosso controle e não somos responsáveis por elas." },
+        { h: "5. Limitação de responsabilidade", p: "O serviço é oferecido <em>\"como está\"</em>, sem garantias de qualquer tipo. Não nos responsabilizamos por perdas, danos ou interrupções decorrentes do uso do site ou dos serviços de terceiros." },
+        { h: "6. Encerramento", p: "Podemos suspender ou encerrar seu acesso ao serviço se você violar estes Termos. Você pode encerrar seu uso a qualquer momento revogando a autorização do app em <a href=\"https://www.spotify.com/account/apps\" target=\"_blank\" style=\"color:#1ed760;\">spotify.com/account/apps</a>." },
+        { h: "7. Termos específicos do Spotify", p: `Se você usa este site, você reconhece e concorda com o seguinte:
+          <ul style="color:#bbb;font-size:14px;line-height:1.7;margin:10px 0;padding-left:20px;">
+            <li>Não fazemos garantias em nome do Spotify e renunciamos expressamente a todas as garantias implícitas relativas à Plataforma, Serviço e Conteúdo do Spotify, incluindo comerciabilidade, adequação a um propósito específico e não violação.</li>
+            <li>É proibido modificar ou criar trabalhos derivados da Plataforma, Serviço ou Conteúdo do Spotify.</li>
+            <li>É proibido descompilar, fazer engenharia reversa ou reduzir o Spotify a forma legível por humanos, na máxima extensão permitida por lei.</li>
+            <li>Você é exclusivamente responsável pelo uso do site. O Spotify não é responsável por nada decorrente do seu uso deste site.</li>
+            <li>O Spotify é <strong>beneficiário terceiro</strong> destes Termos e da nossa Política de Privacidade, com direito a executar esses termos diretamente contra você.</li>
+            <li>Você consente com a coleta e uso dos seus dados do Spotify (tokens de autenticação) para as finalidades de integração descritas neste site. Esses tokens são armazenados de forma segura e usados apenas para habilitar as funcionalidades aqui descritas.</li>
+            <li>O uso de funcionalidades integradas ao Spotify também é regido pelos <a href="https://developer.spotify.com/terms" target="_blank" style="color:#1ed760;">Developer Terms of Service</a> do Spotify, que você deve revisar e cumprir.</li>
+          </ul>` },
+        { h: "8. Alterações", p: "Podemos atualizar estes Termos a qualquer momento. O uso continuado após a atualização significa que você aceita as novas condições." },
+        { h: "9. Contato", p: 'Dúvidas? Entre em contato em <a href="https://github.com/Asrus21" target="_blank" style="color:#1ed760;">github.com/Asrus21</a>.' },
+      ],
+    },
+    en: {
+      title: "Terms of Use",
+      updated: "Last updated: May 26, 2026",
+      sections: [
+        { h: "1. About this service", p: "This website provides a stream command called <strong>Now Playing</strong>, which displays the song the streamer is listening to on Spotify. By using this site, you agree to these Terms of Use. If you do not agree, do not use the service." },
+        { h: "2. How it works", p: "You authorize this site to read only the song currently playing on your Spotify account (scopes <code>user-read-currently-playing</code> and <code>user-read-playback-state</code>). We do not have access to passwords, playlists, library, e-mail or financial data." },
+        { h: "3. Permitted use", p: "Personal, non-commercial use only. You may not resell, redistribute, reverse-engineer or attempt to bypass any security measures of this site." },
+        { h: "4. Third-party services", p: "This site uses the <strong>Spotify</strong> API. We do not own or control Spotify. Any downtime, changes or limitations imposed by Spotify are outside our control and we are not liable for them." },
+        { h: "5. Limitation of liability", p: "The service is provided <em>\"as is\"</em>, without warranties of any kind. We are not liable for losses, damages or disruptions arising from the use of this site or third-party services." },
+        { h: "6. Termination", p: "We may suspend or end your access to the service if you violate these Terms. You can stop using the service at any time by revoking the app's authorization at <a href=\"https://www.spotify.com/account/apps\" target=\"_blank\" style=\"color:#1ed760;\">spotify.com/account/apps</a>." },
+        { h: "7. Spotify-specific terms", p: `By using this site, you acknowledge and agree to the following:
+          <ul style="color:#bbb;font-size:14px;line-height:1.7;margin:10px 0;padding-left:20px;">
+            <li>We make no warranties on behalf of Spotify and expressly disclaim all implied warranties regarding the Spotify Platform, Service and Content, including merchantability, fitness for a particular purpose and non-infringement.</li>
+            <li>You may not modify or create derivative works of the Spotify Platform, Service or Content.</li>
+            <li>You may not decompile, reverse-engineer or reduce Spotify to human-readable form, to the fullest extent permitted by law.</li>
+            <li>You are solely responsible for your use of this site. Spotify is not liable for anything arising from your use of this site.</li>
+            <li>Spotify is a <strong>third-party beneficiary</strong> of these Terms and of our Privacy Policy, with the right to enforce these terms directly against you.</li>
+            <li>You consent to the collection and use of your Spotify data (authentication tokens) for the integration purposes described on this site. These tokens are stored securely and only used to enable the features described here.</li>
+            <li>The use of Spotify-integrated features is also governed by Spotify's <a href="https://developer.spotify.com/terms" target="_blank" style="color:#1ed760;">Developer Terms of Service</a>, which you must review and comply with.</li>
+          </ul>` },
+        { h: "8. Changes", p: "We may update these Terms at any time. Continued use after an update means you accept the new conditions." },
+        { h: "9. Contact", p: 'Questions? Contact us at <a href="https://github.com/Asrus21" target="_blank" style="color:#1ed760;">github.com/Asrus21</a>.' },
+      ],
+    },
+  },
+  privacy: {
+    pt: {
+      title: "Política de Privacidade",
+      updated: "Última atualização: 26 de maio de 2026",
+      sections: [
+        { h: "1. Resumo", p: "Levamos sua privacidade a sério. Coletamos apenas o mínimo necessário para o comando funcionar. Não vendemos seus dados, não rastreamos você para anúncios e não compartilhamos suas informações com terceiros." },
+        { h: "2. O que coletamos", p: `Quando você autoriza o serviço, guardamos no nosso banco de dados:
+          <ul style="color:#bbb;font-size:14px;line-height:1.7;margin:10px 0;padding-left:20px;">
+            <li><strong>Seu ID de usuário do Spotify</strong> — identificador público da sua conta.</li>
+            <li><strong>access_token e refresh_token</strong> — usados para consultar a música atual via API do Spotify.</li>
+            <li><strong>Um identificador aleatório (command_id)</strong> — usado na URL do seu comando.</li>
+            <li><strong>O formato escolhido</strong> — texto que define como o comando aparece na sua live.</li>
+          </ul>
+          Não coletamos seu e-mail, senha, dados financeiros nem qualquer informação pessoal além do necessário.` },
+        { h: "3. O que NÃO coletamos", p: "Não acessamos suas playlists, biblioteca, histórico de músicas, dados de cartão, e-mail ou contatos. Os escopos solicitados ao Spotify se limitam a <code>user-read-currently-playing</code> e <code>user-read-playback-state</code> — apenas a música atualmente tocando." },
+        { h: "4. Como usamos seus dados", p: "Os dados coletados são usados exclusivamente para fazer o comando funcionar. Não usamos para análises, propaganda, perfilamento ou qualquer outra finalidade." },
+        { h: "5. Compartilhamento", p: "Não vendemos nem compartilhamos seus dados com terceiros. As únicas exceções são: (a) consultas necessárias à API do Spotify para o funcionamento do comando; (b) obrigações legais, como ordem judicial." },
+        { h: "6. Retenção", p: "Mantemos seus dados enquanto você usar o serviço. Quando solicitada a exclusão, removemos todos os seus dados do nosso banco em até 7 dias." },
+        { h: "7. Exclusão de conta", p: 'Para excluir seus dados, entre em contato em <a href="https://github.com/Asrus21" target="_blank" style="color:#1ed760;">github.com/Asrus21</a> informando seu command_id. Você também pode <strong>revogar a autorização diretamente no Spotify</strong> em <a href="https://www.spotify.com/account/apps" target="_blank" style="color:#1ed760;">spotify.com/account/apps</a> — após isso, mesmo que nosso banco ainda tenha o token, ele não funcionará mais.' },
+        { h: "8. Segurança", p: "Seus dados ficam armazenados em um banco de dados PostgreSQL hospedado em servidores seguros (Railway). Adotamos práticas padrão da indústria para proteger contra acesso não autorizado, perda ou alteração." },
+        { h: "9. Spotify como beneficiário", p: "Você reconhece que o Spotify é beneficiário terceiro desta Política de Privacidade, com direito a executar diretamente contra você os termos relativos ao uso de dados do Spotify." },
+        { h: "10. Alterações", p: "Podemos atualizar esta política. Mudanças significativas serão anunciadas nesta página. O uso continuado após uma atualização significa que você aceita os novos termos." },
+      ],
+    },
+    en: {
+      title: "Privacy Policy",
+      updated: "Last updated: May 26, 2026",
+      sections: [
+        { h: "1. Summary", p: "We take your privacy seriously. We collect only the minimum needed for the command to work. We do not sell your data, we do not track you for ads, and we do not share your information with third parties." },
+        { h: "2. What we collect", p: `When you authorize the service, we store in our database:
+          <ul style="color:#bbb;font-size:14px;line-height:1.7;margin:10px 0;padding-left:20px;">
+            <li><strong>Your Spotify user ID</strong> — public identifier of your account.</li>
+            <li><strong>access_token and refresh_token</strong> — used to query the currently playing song via the Spotify API.</li>
+            <li><strong>A random identifier (command_id)</strong> — used in your command URL.</li>
+            <li><strong>The format you chose</strong> — text that defines how the command appears in your stream.</li>
+          </ul>
+          We do not collect your email, password, financial data or any other personal information.` },
+        { h: "3. What we do NOT collect", p: "We do not access your playlists, library, listening history, card data, email or contacts. The scopes requested from Spotify are limited to <code>user-read-currently-playing</code> and <code>user-read-playback-state</code> — only the song currently playing." },
+        { h: "4. How we use your data", p: "The collected data is used exclusively to make the command work. We do not use it for analytics, advertising, profiling or any other purpose." },
+        { h: "5. Sharing", p: "We do not sell or share your data with third parties. The only exceptions are: (a) necessary requests to the Spotify API for the command to work; (b) legal obligations, such as a court order." },
+        { h: "6. Retention", p: "We keep your data for as long as you use the service. When deletion is requested, we remove all your data from our database within 7 days." },
+        { h: "7. Account deletion", p: 'To delete your data, contact us at <a href="https://github.com/Asrus21" target="_blank" style="color:#1ed760;">github.com/Asrus21</a> with your command_id. You can also <strong>revoke authorization directly on Spotify</strong> at <a href="https://www.spotify.com/account/apps" target="_blank" style="color:#1ed760;">spotify.com/account/apps</a> — after that, even if our database still has the token, it will no longer work.' },
+        { h: "8. Security", p: "Your data is stored in a PostgreSQL database hosted on secure servers (Railway). We use industry-standard practices to protect against unauthorized access, loss or alteration." },
+        { h: "9. Spotify as beneficiary", p: "You acknowledge that Spotify is a third-party beneficiary of this Privacy Policy, with the right to enforce directly against you the terms related to the use of Spotify data." },
+        { h: "10. Changes", p: "We may update this policy. Significant changes will be announced on this page. Continued use after an update means you accept the new terms." },
+      ],
+    },
+  },
+};
+
+function renderLegalPage(docKey, lang) {
+  const doc = LEGAL[docKey][lang];
+  const baseRoute = docKey === "terms" ? "/terms" : "/privacy";
+  const back = lang === "pt" ? "← Voltar ao registro" : "← Back to register";
+
+  const body = doc.sections.map(s => `
+    <h3 style="margin-top:28px;font-size:17px;">${s.h}</h3>
+    <div style="color:#bbb;font-size:14px;line-height:1.7;">${s.p}</div>
+  `).join("");
+
+  return `
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>${doc.title} | Now Playing</title>
+      </head>
+      <body style="font-family:sans-serif;background:#191414;color:#fff;margin:0;padding:40px 20px;">
+        <div style="max-width:720px;margin:0 auto;">
+          ${langSwitcher(`${BASE_URL}${baseRoute}`, lang)}
+          <h1 style="font-size:26px;">${doc.title}</h1>
+          <p style="color:#777;font-size:13px;">${doc.updated}</p>
+          ${body}
+          <p style="margin-top:40px;">
+            <a href="${BASE_URL}/register?lang=${lang}" style="color:#1ed760;text-decoration:none;font-size:14px;">${back}</a>
+          </p>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+app.get("/terms", (req, res) => {
+  res.send(renderLegalPage("terms", getLang(req)));
+});
+
+app.get("/privacy", (req, res) => {
+  res.send(renderLegalPage("privacy", getLang(req)));
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
