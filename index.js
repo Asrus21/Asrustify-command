@@ -196,6 +196,11 @@ async function fetchCurrentTrack(token) {
       nome: item.name,
       artista: item.show?.name || "",
       link: item.external_urls.spotify,
+      albumArt: item.images?.[0]?.url || item.show?.images?.[0]?.url || null,
+      albumLink: item.show?.external_urls?.spotify || item.external_urls.spotify,
+      progressMs: playing.data.progress_ms || 0,
+      durationMs: item.duration_ms || 0,
+      type: "episode",
     };
   }
 
@@ -203,7 +208,29 @@ async function fetchCurrentTrack(token) {
     nome: item.name,
     artista: item.artists.map((a) => a.name).join(", "),
     link: item.external_urls.spotify,
+    albumArt: item.album?.images?.[0]?.url || null,
+    albumLink: item.album?.external_urls?.spotify || item.external_urls.spotify,
+    progressMs: playing.data.progress_ms || 0,
+    durationMs: item.duration_ms || 0,
+    type: "track",
   };
+}
+
+// ─── Buscar proxima musica na fila ────────────────────────────────────────────
+async function fetchQueue(token) {
+  try {
+    const res = await axios.get("https://api.spotify.com/v1/me/player/queue", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const next = res.data.queue?.[0];
+    if (!next) return null;
+    if (next.type === "episode") {
+      return next.name;
+    }
+    return next.name;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Componente: botao de troca de idioma ─────────────────────────────────────
@@ -458,6 +485,12 @@ app.post("/formato/:commandId", async (req, res) => {
           <p style="color:#aaa;font-size:13px;">StreamElements:</p>
           <code style="background:#222;padding:8px 16px;border-radius:6px;display:inline-block;">${"${customapi." + BASE_URL + "/musica/" + commandId + "}"}</code>
           <br><br>
+          <hr style="border:none;border-top:1px solid #333;margin:20px 0;">
+          <p style="color:#aaa;font-size:13px;">${lang === "pt" ? "Widget visual para o OBS (Browser Source):" : "Visual widget for OBS (Browser Source):"}</p>
+          <code style="background:#222;padding:8px 16px;border-radius:6px;display:inline-block;font-size:13px;">${BASE_URL}/widget/${commandId}</code>
+          <br>
+          <a href="${BASE_URL}/widget/${commandId}" target="_blank" style="color:#1ed760;font-size:12px;display:inline-block;margin-top:8px;">${lang === "pt" ? "Abrir widget em nova aba" : "Open widget in new tab"}</a>
+          <br><br>
           <a href="${BASE_URL}/formato/${commandId}?lang=${lang}" style="color:#1ed760;font-size:13px;">${t.okChangeAgain}</a>
         </div>
       </body>
@@ -501,6 +534,265 @@ app.get("/musica/:commandId", async (req, res) => {
     console.error(err.response?.data || err.message);
     res.send(t.errorFetch);
   }
+});
+
+// ─── ROTA: API JSON para o widget ─────────────────────────────────────────────
+// Retorna a musica atual + proxima em JSON, usado pelo widget visual.
+async function getCurrentTrackData(user) {
+  async function attempt(token) {
+    const current = await fetchCurrentTrack(token);
+    if (!current) return null;
+    const next = await fetchQueue(token);
+    return { ...current, next };
+  }
+
+  try {
+    return await attempt(user.access_token);
+  } catch (err) {
+    if (err.response?.status === 401) {
+      const newToken = await refreshAccessToken(user.spotify_id, user.refresh_token);
+      return await attempt(newToken);
+    }
+    throw err;
+  }
+}
+
+app.get("/api/now/:commandId", async (req, res) => {
+  const { commandId } = req.params;
+  const user = await getUserByCommandId(commandId);
+
+  if (!user || !user.access_token) {
+    return res.status(404).json({ playing: false, error: "invalid_id" });
+  }
+
+  try {
+    const data = await getCurrentTrackData(user);
+    if (!data) return res.json({ playing: false });
+    res.json({ playing: true, ...data });
+  } catch (err) {
+    console.error("Erro na API now:", err.response?.data || err.message);
+    res.status(500).json({ playing: false, error: "fetch_failed" });
+  }
+});
+
+// ─── ROTA: Widget visual (para usar como Browser Source no OBS) ───────────────
+app.get("/widget/:commandId", async (req, res) => {
+  const { commandId } = req.params;
+  const user = await getUserByCommandId(commandId);
+
+  if (!user) {
+    return res.send(`<html><body style="background:transparent;color:#fff;font-family:sans-serif;padding:20px;">Invalid command_id</body></html>`);
+  }
+
+  // Logo oficial do Spotify (Spotify green icon como SVG inline, seguindo guidelines)
+  const spotifyIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168 168" width="36" height="36">
+    <path fill="#1ed760" d="M83.996.277C37.747.277.253 37.77.253 84.019c0 46.251 37.494 83.741 83.743 83.741 46.254 0 83.744-37.49 83.744-83.741 0-46.246-37.49-83.738-83.745-83.738l.001-.004zm38.404 120.78a5.217 5.217 0 01-7.18 1.73c-19.662-12.01-44.414-14.73-73.564-8.07a5.222 5.222 0 01-6.249-3.93 5.213 5.213 0 013.926-6.25c31.9-7.291 59.263-4.15 81.337 9.34 2.46 1.51 3.24 4.72 1.73 7.18zm10.25-22.805c-1.89 3.075-5.91 4.045-8.98 2.155-22.51-13.839-56.823-17.846-83.448-9.764-3.453 1.043-7.1-.903-8.148-4.35a6.538 6.538 0 014.354-8.143c30.413-9.228 68.222-4.758 94.072 11.127 3.07 1.89 4.04 5.91 2.15 8.976v-.001zm.88-23.744c-26.99-16.031-71.52-17.505-97.289-9.684-4.138 1.255-8.514-1.081-9.768-5.219a7.835 7.835 0 015.221-9.771c29.581-8.98 78.756-7.245 109.83 11.202a7.823 7.823 0 012.74 10.733c-2.2 3.722-7.02 4.949-10.73 2.739z"/>
+  </svg>`;
+
+  // Pagina HTML do widget. Atualiza via fetch a cada 3s.
+  res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Now Playing Widget</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      background: transparent;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #fff;
+      overflow: hidden;
+    }
+    .widget {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 16px;
+      background: #191414;
+      border-radius: 16px;
+      max-width: 560px;
+      transition: opacity 0.3s;
+    }
+    .widget.hidden { opacity: 0.4; }
+    .album-link {
+      flex-shrink: 0;
+      display: block;
+      line-height: 0;
+    }
+    .album-art {
+      width: 96px;
+      height: 96px;
+      border-radius: 8px;
+      object-fit: cover;
+      display: block;
+    }
+    .album-art-placeholder {
+      width: 96px;
+      height: 96px;
+      border-radius: 8px;
+      background: #282828;
+    }
+    .info {
+      flex: 1;
+      min-width: 0;
+    }
+    .track-name {
+      font-size: 22px;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 4px;
+    }
+    .artist {
+      font-size: 16px;
+      color: #e0e0e0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 6px;
+    }
+    .next-song {
+      font-size: 13px;
+      color: #aaa;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 10px;
+    }
+    .progress-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: #aaa;
+    }
+    .progress-bar {
+      flex: 1;
+      height: 6px;
+      background: #404040;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #1ed760;
+      width: 0%;
+      transition: width 1s linear;
+    }
+    .spotify-logo {
+      flex-shrink: 0;
+      align-self: flex-start;
+      line-height: 0;
+    }
+    .idle-message {
+      text-align: center;
+      padding: 24px;
+      color: #888;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script>
+    const COMMAND_ID = ${JSON.stringify(commandId)};
+    const API_URL = ${JSON.stringify(BASE_URL)} + "/api/now/" + COMMAND_ID;
+    const SPOTIFY_ICON = ${JSON.stringify(spotifyIconSvg)};
+
+    let lastTrack = null;
+    let lastProgress = 0;
+    let lastDuration = 0;
+    let lastUpdate = Date.now();
+
+    function fmtTime(ms) {
+      const total = Math.max(0, Math.floor(ms / 1000));
+      const m = Math.floor(total / 60);
+      const s = total % 60;
+      return m + ":" + (s < 10 ? "0" : "") + s;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+
+    function render(data) {
+      const root = document.getElementById("root");
+
+      if (!data || !data.playing) {
+        root.innerHTML = '<div class="widget hidden">' +
+          '<div class="album-art-placeholder"></div>' +
+          '<div class="info">' +
+            '<div class="track-name">—</div>' +
+            '<div class="artist">Spotify</div>' +
+          '</div>' +
+          '<div class="spotify-logo">' + SPOTIFY_ICON + '</div>' +
+        '</div>';
+        return;
+      }
+
+      lastTrack = data.link;
+      lastProgress = data.progressMs;
+      lastDuration = data.durationMs;
+      lastUpdate = Date.now();
+
+      const albumImg = data.albumArt
+        ? '<img class="album-art" src="' + escapeHtml(data.albumArt) + '" alt="Album art">'
+        : '<div class="album-art-placeholder"></div>';
+
+      const nextSongHtml = data.next
+        ? '<div class="next-song">Next: ' + escapeHtml(data.next) + '</div>'
+        : '';
+
+      root.innerHTML =
+        '<div class="widget">' +
+          '<a class="album-link" href="' + escapeHtml(data.albumLink || data.link) + '" target="_blank">' +
+            albumImg +
+          '</a>' +
+          '<div class="info">' +
+            '<div class="track-name">' + escapeHtml(data.nome) + '</div>' +
+            '<div class="artist">' + escapeHtml(data.artista) + '</div>' +
+            nextSongHtml +
+            '<div class="progress-row">' +
+              '<span id="progress-time">' + fmtTime(data.progressMs) + '</span>' +
+              '<div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:' + (data.durationMs ? (data.progressMs / data.durationMs * 100) : 0) + '%"></div></div>' +
+              '<span>' + fmtTime(data.durationMs) + '</span>' +
+            '</div>' +
+          '</div>' +
+          '<a class="spotify-logo" href="' + escapeHtml(data.link) + '" target="_blank">' + SPOTIFY_ICON + '</a>' +
+        '</div>';
+    }
+
+    // Atualiza o tempo localmente entre os fetches (suavidade)
+    function tickProgress() {
+      const fill = document.getElementById("progress-fill");
+      const label = document.getElementById("progress-time");
+      if (!fill || !label || !lastDuration) return;
+      const elapsed = lastProgress + (Date.now() - lastUpdate);
+      const pct = Math.min(100, (elapsed / lastDuration) * 100);
+      fill.style.width = pct + "%";
+      label.textContent = fmtTime(elapsed);
+    }
+
+    async function refresh() {
+      try {
+        const res = await fetch(API_URL, { cache: "no-store" });
+        const data = await res.json();
+        render(data);
+      } catch (e) {
+        // mantém a tela como está em caso de erro de rede
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 3000);
+    setInterval(tickProgress, 500);
+  </script>
+</body>
+</html>`);
 });
 
 // ─── Documentos legais ────────────────────────────────────────────────────────
