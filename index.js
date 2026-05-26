@@ -22,8 +22,8 @@ const DEFAULT_FORMAT = "Tocando agora: {nome} - {artista} | {link}";
 // ─── Traducoes ────────────────────────────────────────────────────────────────
 const T = {
   pt: {
-    pageTitle: 'Comando "Tocando Agora"',
-    heroTitle: '🎵 Comando "Tocando Agora"',
+    pageTitle: 'Asrustify-command',
+    heroTitle: '🎵 Asrustify-command',
     heroSubtitle: "Conecte sua conta do Spotify e use o comando na sua live para mostrar a música que está tocando.",
     step1Title: "Tenha uma conta no Spotify",
     step1Text: "Se você ainda não tem, crie uma conta gratuita no Spotify. Funciona com conta Free ou Premium.",
@@ -59,8 +59,8 @@ const T = {
     errorFetch: "Erro ao buscar música.",
   },
   en: {
-    pageTitle: '"Now Playing" Command',
-    heroTitle: '🎵 "Now Playing" Command',
+    pageTitle: 'Asrustify-command',
+    heroTitle: '🎵 Asrustify-command',
     heroSubtitle: "Connect your Spotify account and use the command on your stream to show the song currently playing.",
     step1Title: "Have a Spotify account",
     step1Text: "If you don't have one yet, create a free Spotify account. It works with Free or Premium accounts.",
@@ -594,7 +594,7 @@ app.get("/widget/:commandId", async (req, res) => {
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Now Playing Widget</title>
+  <title>Asrustify-command Widget</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
@@ -802,7 +802,7 @@ const LEGAL = {
       title: "Termos de Uso",
       updated: "Última atualização: 26 de maio de 2026",
       sections: [
-        { h: "1. Sobre este serviço", p: "Este site oferece um comando para lives chamado <strong>Now Playing</strong>, que exibe a música que o streamer está ouvindo no Spotify. Ao usar este site você concorda com estes Termos de Uso. Se não concordar, não utilize o serviço." },
+        { h: "1. Sobre este serviço", p: "Este site oferece um comando para lives chamado <strong>Asrustify-command</strong>, que exibe a música que o streamer está ouvindo no Spotify. Ao usar este site você concorda com estes Termos de Uso. Se não concordar, não utilize o serviço." },
         { h: "2. Como funciona", p: "Você autoriza este site a ler apenas a música que está tocando agora na sua conta Spotify (escopos <code>user-read-currently-playing</code> e <code>user-read-playback-state</code>). Não temos acesso a senhas, playlists, biblioteca, e-mail ou dados financeiros." },
         { h: "3. Uso permitido", p: "É permitido o uso pessoal e não comercial. Você não pode revender, redistribuir, fazer engenharia reversa ou tentar contornar mecanismos de segurança do site." },
         { h: "4. Serviços de terceiros", p: "Este site usa a API do <strong>Spotify</strong>. Não somos donos nem controlamos o Spotify. Indisponibilidades, mudanças ou limitações impostas pelo Spotify estão fora do nosso controle e não somos responsáveis por elas." },
@@ -819,14 +819,14 @@ const LEGAL = {
             <li>O uso de funcionalidades integradas ao Spotify também é regido pelos <a href="https://developer.spotify.com/terms" target="_blank" style="color:#1ed760;">Developer Terms of Service</a> do Spotify, que você deve revisar e cumprir.</li>
           </ul>` },
         { h: "8. Alterações", p: "Podemos atualizar estes Termos a qualquer momento. O uso continuado após a atualização significa que você aceita as novas condições." },
-        { h: "9. Contato", p: 'Dúvidas? Entre em contato em <a href="https://github.com/Asrus21" target="_blank" style="color:#1ed760;">github.com/Asrus21</a>.' },
+        { h: "9. Contato", p: 'Dúvidas? Entre em contato em <a href="https://github.com/Asrus21/Asrustify-command" target="_blank" style="color:#1ed760;">github.com/Asrus21/Asrustify-command</a>.' },
       ],
     },
     en: {
       title: "Terms of Use",
       updated: "Last updated: May 26, 2026",
       sections: [
-        { h: "1. About this service", p: "This website provides a stream command called <strong>Now Playing</strong>, which displays the song the streamer is listening to on Spotify. By using this site, you agree to these Terms of Use. If you do not agree, do not use the service." },
+        { h: "1. About this service", p: "This website provides a stream command called <strong>Asrustify-command</strong>, which displays the song the streamer is listening to on Spotify. By using this site, you agree to these Terms of Use. If you do not agree, do not use the service." },
         { h: "2. How it works", p: "You authorize this site to read only the song currently playing on your Spotify account (scopes <code>user-read-currently-playing</code> and <code>user-read-playback-state</code>). We do not have access to passwords, playlists, library, e-mail or financial data." },
         { h: "3. Permitted use", p: "Personal, non-commercial use only. You may not resell, redistribute, reverse-engineer or attempt to bypass any security measures of this site." },
         { h: "4. Third-party services", p: "This site uses the <strong>Spotify</strong> API. We do not own or control Spotify. Any downtime, changes or limitations imposed by Spotify are outside our control and we are not liable for them." },
@@ -843,7 +843,7 @@ const LEGAL = {
             <li>The use of Spotify-integrated features is also governed by Spotify's <a href="https://developer.spotify.com/terms" target="_blank" style="color:#1ed760;">Developer Terms of Service</a>, which you must review and comply with.</li>
           </ul>` },
         { h: "8. Changes", p: "We may update these Terms at any time. Continued use after an update means you accept the new conditions." },
-        { h: "9. Contact", p: 'Questions? Contact us at <a href="https://github.com/Asrus21" target="_blank" style="color:#1ed760;">github.com/Asrus21</a>.' },
+        { h: "9. Contact", p: 'Questions? Contact us at <a href="https://github.com/Asrus21/Asrustify-command" target="_blank" style="color:#1ed760;">github.com/Asrus21/Asrustify-command</a>.' },
       ],
     },
   },
@@ -865,7 +865,7 @@ const LEGAL = {
         { h: "4. Como usamos seus dados", p: "Os dados coletados são usados exclusivamente para fazer o comando funcionar. Não usamos para análises, propaganda, perfilamento ou qualquer outra finalidade." },
         { h: "5. Compartilhamento", p: "Não vendemos nem compartilhamos seus dados com terceiros. As únicas exceções são: (a) consultas necessárias à API do Spotify para o funcionamento do comando; (b) obrigações legais, como ordem judicial." },
         { h: "6. Retenção", p: "Mantemos seus dados enquanto você usar o serviço. Quando solicitada a exclusão, removemos todos os seus dados do nosso banco em até 7 dias." },
-        { h: "7. Exclusão de conta", p: 'Para excluir seus dados, entre em contato em <a href="https://github.com/Asrus21" target="_blank" style="color:#1ed760;">github.com/Asrus21</a> informando seu command_id. Você também pode <strong>revogar a autorização diretamente no Spotify</strong> em <a href="https://www.spotify.com/account/apps" target="_blank" style="color:#1ed760;">spotify.com/account/apps</a> — após isso, mesmo que nosso banco ainda tenha o token, ele não funcionará mais.' },
+        { h: "7. Exclusão de conta", p: 'Para excluir seus dados, entre em contato em <a href="https://github.com/Asrus21/Asrustify-command" target="_blank" style="color:#1ed760;">github.com/Asrus21/Asrustify-command</a> informando seu command_id. Você também pode <strong>revogar a autorização diretamente no Spotify</strong> em <a href="https://www.spotify.com/account/apps" target="_blank" style="color:#1ed760;">spotify.com/account/apps</a> — após isso, mesmo que nosso banco ainda tenha o token, ele não funcionará mais.' },
         { h: "8. Segurança", p: "Seus dados ficam armazenados em um banco de dados PostgreSQL hospedado em servidores seguros (Railway). Adotamos práticas padrão da indústria para proteger contra acesso não autorizado, perda ou alteração." },
         { h: "9. Spotify como beneficiário", p: "Você reconhece que o Spotify é beneficiário terceiro desta Política de Privacidade, com direito a executar diretamente contra você os termos relativos ao uso de dados do Spotify." },
         { h: "10. Alterações", p: "Podemos atualizar esta política. Mudanças significativas serão anunciadas nesta página. O uso continuado após uma atualização significa que você aceita os novos termos." },
@@ -888,7 +888,7 @@ const LEGAL = {
         { h: "4. How we use your data", p: "The collected data is used exclusively to make the command work. We do not use it for analytics, advertising, profiling or any other purpose." },
         { h: "5. Sharing", p: "We do not sell or share your data with third parties. The only exceptions are: (a) necessary requests to the Spotify API for the command to work; (b) legal obligations, such as a court order." },
         { h: "6. Retention", p: "We keep your data for as long as you use the service. When deletion is requested, we remove all your data from our database within 7 days." },
-        { h: "7. Account deletion", p: 'To delete your data, contact us at <a href="https://github.com/Asrus21" target="_blank" style="color:#1ed760;">github.com/Asrus21</a> with your command_id. You can also <strong>revoke authorization directly on Spotify</strong> at <a href="https://www.spotify.com/account/apps" target="_blank" style="color:#1ed760;">spotify.com/account/apps</a> — after that, even if our database still has the token, it will no longer work.' },
+        { h: "7. Account deletion", p: 'To delete your data, contact us at <a href="https://github.com/Asrus21/Asrustify-command" target="_blank" style="color:#1ed760;">github.com/Asrus21/Asrustify-command</a> with your command_id. You can also <strong>revoke authorization directly on Spotify</strong> at <a href="https://www.spotify.com/account/apps" target="_blank" style="color:#1ed760;">spotify.com/account/apps</a> — after that, even if our database still has the token, it will no longer work.' },
         { h: "8. Security", p: "Your data is stored in a PostgreSQL database hosted on secure servers (Railway). We use industry-standard practices to protect against unauthorized access, loss or alteration." },
         { h: "9. Spotify as beneficiary", p: "You acknowledge that Spotify is a third-party beneficiary of this Privacy Policy, with the right to enforce directly against you the terms related to the use of Spotify data." },
         { h: "10. Changes", p: "We may update this policy. Significant changes will be announced on this page. Continued use after an update means you accept the new terms." },
@@ -912,7 +912,7 @@ function renderLegalPage(docKey, lang) {
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>${doc.title} | Now Playing</title>
+        <title>${doc.title} | Asrustify-command</title>
       </head>
       <body style="font-family:sans-serif;background:#191414;color:#fff;margin:0;padding:40px 20px;">
         <div style="max-width:720px;margin:0 auto;">
