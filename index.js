@@ -709,7 +709,12 @@ app.get("/widget/:commandId", async (req, res) => {
 
   <script>
     const COMMAND_ID = ${JSON.stringify(commandId)};
-    const API_URL = ${JSON.stringify(BASE_URL)} + "/api/now/" + COMMAND_ID;
+    // Monta a URL da API relativa ao local atual:
+    // /spotify/widget/<id>  -> /spotify/api/now/<id>
+    // /widget/<id>          -> /api/now/<id>
+    // Assim funciona tanto pelo dominio asrus.app quanto direto pelo Railway,
+    // e evita problemas de CORS/redirect entre dominios.
+    const API_URL = location.pathname.replace(/\\/widget\\/[^/]+$/, "/api/now/" + COMMAND_ID);
     const SPOTIFY_ICON = ${JSON.stringify(spotifyIconSvg)};
 
     let lastProgress = 0;
