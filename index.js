@@ -685,23 +685,33 @@ app.get("/widget/:commandId", async (req, res) => {
       align-self: flex-start;
       line-height: 0;
     }
-    .idle-message {
-      text-align: center;
-      padding: 24px;
-      color: #888;
-      font-size: 14px;
+    .error-box {
+      background: #4a1f1f;
+      color: #ffcccc;
+      padding: 16px;
+      border-radius: 12px;
+      font-size: 13px;
+      max-width: 560px;
     }
   </style>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root">
+    <div class="widget hidden">
+      <div class="album-art-placeholder"></div>
+      <div class="info">
+        <div class="track-name">Loading…</div>
+        <div class="artist">Spotify</div>
+      </div>
+      <div class="spotify-logo">${spotifyIconSvg}</div>
+    </div>
+  </div>
 
   <script>
     const COMMAND_ID = ${JSON.stringify(commandId)};
     const API_URL = ${JSON.stringify(BASE_URL)} + "/api/now/" + COMMAND_ID;
     const SPOTIFY_ICON = ${JSON.stringify(spotifyIconSvg)};
 
-    let lastTrack = null;
     let lastProgress = 0;
     let lastDuration = 0;
     let lastUpdate = Date.now();
@@ -719,6 +729,11 @@ app.get("/widget/:commandId", async (req, res) => {
       });
     }
 
+    function showError(msg) {
+      document.getElementById("root").innerHTML =
+        '<div class="error-box">Widget error: ' + escapeHtml(msg) + '</div>';
+    }
+
     function render(data) {
       const root = document.getElementById("root");
 
@@ -727,16 +742,15 @@ app.get("/widget/:commandId", async (req, res) => {
           '<div class="album-art-placeholder"></div>' +
           '<div class="info">' +
             '<div class="track-name">—</div>' +
-            '<div class="artist">Spotify</div>' +
+            '<div class="artist">Nothing playing</div>' +
           '</div>' +
           '<div class="spotify-logo">' + SPOTIFY_ICON + '</div>' +
         '</div>';
         return;
       }
 
-      lastTrack = data.link;
-      lastProgress = data.progressMs;
-      lastDuration = data.durationMs;
+      lastProgress = data.progressMs || 0;
+      lastDuration = data.durationMs || 0;
       lastUpdate = Date.now();
 
       const albumImg = data.albumArt
@@ -746,6 +760,8 @@ app.get("/widget/:commandId", async (req, res) => {
       const nextSongHtml = data.next
         ? '<div class="next-song">Next: ' + escapeHtml(data.next) + '</div>'
         : '';
+
+      const pct = lastDuration ? (lastProgress / lastDuration * 100) : 0;
 
       root.innerHTML =
         '<div class="widget">' +
@@ -757,16 +773,15 @@ app.get("/widget/:commandId", async (req, res) => {
             '<div class="artist">' + escapeHtml(data.artista) + '</div>' +
             nextSongHtml +
             '<div class="progress-row">' +
-              '<span id="progress-time">' + fmtTime(data.progressMs) + '</span>' +
-              '<div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:' + (data.durationMs ? (data.progressMs / data.durationMs * 100) : 0) + '%"></div></div>' +
-              '<span>' + fmtTime(data.durationMs) + '</span>' +
+              '<span id="progress-time">' + fmtTime(lastProgress) + '</span>' +
+              '<div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:' + pct + '%"></div></div>' +
+              '<span>' + fmtTime(lastDuration) + '</span>' +
             '</div>' +
           '</div>' +
           '<a class="spotify-logo" href="' + escapeHtml(data.link) + '" target="_blank">' + SPOTIFY_ICON + '</a>' +
         '</div>';
     }
 
-    // Atualiza o tempo localmente entre os fetches (suavidade)
     function tickProgress() {
       const fill = document.getElementById("progress-fill");
       const label = document.getElementById("progress-time");
@@ -780,12 +795,21 @@ app.get("/widget/:commandId", async (req, res) => {
     async function refresh() {
       try {
         const res = await fetch(API_URL, { cache: "no-store" });
+        if (!res.ok) {
+          showError("HTTP " + res.status + " — " + API_URL);
+          return;
+        }
         const data = await res.json();
         render(data);
       } catch (e) {
-        // mantém a tela como está em caso de erro de rede
+        showError(e.message + " — " + API_URL);
       }
     }
+
+    // Captura erros globais para nao deixar tela em branco
+    window.addEventListener("error", function (e) {
+      showError("JS error: " + (e.message || "unknown"));
+    });
 
     refresh();
     setInterval(refresh, 3000);
