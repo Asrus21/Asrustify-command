@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
 const { v4: uuidv4 } = require("uuid");
-const { Pool } = require("pg");
+const { neon } = require("@neondatabase/serverless");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -102,14 +102,13 @@ function getLang(req) {
   return lang === "en" ? "en" : "pt";
 }
 
-// ─── Banco de dados PostgreSQL ────────────────────────────────────────────────
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
-});
+// ─── Banco de dados Neon Postgres ─────────────────────────────────────────────
+// Driver serverless: neon() retorna uma template tag sql`...`.
+// DATABASE_URL e injetada automaticamente ao conectar o Neon pela aba Storage.
+const sql = neon(process.env.DATABASE_URL);
 
 async function initDB() {
-  await pool.query(`
+  await sql`
     CREATE TABLE IF NOT EXISTS spotify_users (
       spotify_id    TEXT PRIMARY KEY,
       command_id    TEXT UNIQUE NOT NULL,
@@ -118,39 +117,48 @@ async function initDB() {
       format        TEXT,
       created_at    TIMESTAMP DEFAULT NOW()
     )
-  `);
-  await pool.query(`
-    ALTER TABLE spotify_users
-    ADD COLUMN IF NOT EXISTS format TEXT
-  `).catch(() => {});
-  console.log("Banco de dados pronto.");
+  `;
+}
+
+// Lazy init: uma promise cacheada em escopo de modulo roda o CREATE TABLE na
+// primeira requisicao de cada instancia. Se falhar, a promise e resetada para
+// permitir retry na proxima requisicao.
+let dbInitPromise = null;
+function ensureDB() {
+  if (!dbInitPromise) {
+    dbInitPromise = initDB().catch((err) => {
+      dbInitPromise = null;
+      throw err;
+    });
+  }
+  return dbInitPromise;
 }
 
 async function getUserBySpotifyId(spotifyId) {
-  const res = await pool.query("SELECT * FROM spotify_users WHERE spotify_id = $1", [spotifyId]);
-  return res.rows[0] || null;
+  const rows = await sql`SELECT * FROM spotify_users WHERE spotify_id = ${spotifyId}`;
+  return rows[0] || null;
 }
 
 async function getUserByCommandId(commandId) {
-  const res = await pool.query("SELECT * FROM spotify_users WHERE command_id = $1", [commandId]);
-  return res.rows[0] || null;
+  const rows = await sql`SELECT * FROM spotify_users WHERE command_id = ${commandId}`;
+  return rows[0] || null;
 }
 
 async function saveUser(spotifyId, commandId, accessToken, refreshToken) {
-  await pool.query(`
+  await sql`
     INSERT INTO spotify_users (spotify_id, command_id, access_token, refresh_token)
-    VALUES ($1, $2, $3, $4)
+    VALUES (${spotifyId}, ${commandId}, ${accessToken}, ${refreshToken})
     ON CONFLICT (spotify_id) DO UPDATE
-    SET access_token = $3, refresh_token = $4
-  `, [spotifyId, commandId, accessToken, refreshToken]);
+    SET access_token = ${accessToken}, refresh_token = ${refreshToken}
+  `;
 }
 
 async function updateAccessToken(spotifyId, accessToken) {
-  await pool.query("UPDATE spotify_users SET access_token = $1 WHERE spotify_id = $2", [accessToken, spotifyId]);
+  await sql`UPDATE spotify_users SET access_token = ${accessToken} WHERE spotify_id = ${spotifyId}`;
 }
 
 async function saveFormat(commandId, format) {
-  await pool.query("UPDATE spotify_users SET format = $1 WHERE command_id = $2", [format, commandId]);
+  await sql`UPDATE spotify_users SET format = ${format} WHERE command_id = ${commandId}`;
 }
 
 // ─── Refresh do token ─────────────────────────────────────────────────────────
@@ -246,6 +254,21 @@ function langSwitcher(currentPath, lang) {
     </div>
   `;
 }
+
+// ─── Middleware: garante o banco antes das rotas que dependem dele ────────────
+// Rotas estaticas (/register, /terms, /privacy) devem funcionar mesmo com o
+// banco fora do ar, entao sao puladas aqui.
+const DB_FREE_ROUTES = new Set(["/register", "/terms", "/privacy"]);
+app.use(async (req, res, next) => {
+  if (DB_FREE_ROUTES.has(req.path)) return next();
+  try {
+    await ensureDB();
+    next();
+  } catch (err) {
+    console.error("Falha ao inicializar o banco:", err.message);
+    res.status(500).send("Database error");
+  }
+});
 
 // ─── ROTA 1: Pagina de registro ───────────────────────────────────────────────
 app.get("/register", (req, res) => {
@@ -712,8 +735,8 @@ app.get("/widget/:commandId", async (req, res) => {
     // Monta a URL da API relativa ao local atual:
     // /spotify/widget/<id>  -> /spotify/api/now/<id>
     // /widget/<id>          -> /api/now/<id>
-    // Assim funciona tanto pelo dominio asrus.app quanto direto pelo Railway,
-    // e evita problemas de CORS/redirect entre dominios.
+    // Assim funciona tanto pelo dominio asrus.app quanto direto pela URL da
+    // Vercel, e evita problemas de CORS/redirect entre dominios.
     const API_URL = location.pathname.replace(/\\/widget\\/[^/]+$/, "/api/now/" + COMMAND_ID);
     const SPOTIFY_ICON = ${JSON.stringify(spotifyIconSvg)};
 
@@ -895,7 +918,7 @@ const LEGAL = {
         { h: "5. Compartilhamento", p: "Não vendemos nem compartilhamos seus dados com terceiros. As únicas exceções são: (a) consultas necessárias à API do Spotify para o funcionamento do comando; (b) obrigações legais, como ordem judicial." },
         { h: "6. Retenção", p: "Mantemos seus dados enquanto você usar o serviço. Quando solicitada a exclusão, removemos todos os seus dados do nosso banco em até 7 dias." },
         { h: "7. Exclusão de conta", p: 'Para excluir seus dados, entre em contato em <a href="https://github.com/Asrus21/Asrustify-command" target="_blank" style="color:#1ed760;">github.com/Asrus21/Asrustify-command</a> informando seu command_id. Você também pode <strong>revogar a autorização diretamente no Spotify</strong> em <a href="https://www.spotify.com/account/apps" target="_blank" style="color:#1ed760;">spotify.com/account/apps</a> — após isso, mesmo que nosso banco ainda tenha o token, ele não funcionará mais.' },
-        { h: "8. Segurança", p: "Seus dados ficam armazenados em um banco de dados PostgreSQL hospedado em servidores seguros (Railway). Adotamos práticas padrão da indústria para proteger contra acesso não autorizado, perda ou alteração." },
+        { h: "8. Segurança", p: "Seus dados ficam armazenados em um banco de dados PostgreSQL hospedado em servidores seguros (Neon). Adotamos práticas padrão da indústria para proteger contra acesso não autorizado, perda ou alteração." },
         { h: "9. Spotify como beneficiário", p: "Você reconhece que o Spotify é beneficiário terceiro desta Política de Privacidade, com direito a executar diretamente contra você os termos relativos ao uso de dados do Spotify." },
         { h: "10. Alterações", p: "Podemos atualizar esta política. Mudanças significativas serão anunciadas nesta página. O uso continuado após uma atualização significa que você aceita os novos termos." },
       ],
@@ -918,7 +941,7 @@ const LEGAL = {
         { h: "5. Sharing", p: "We do not sell or share your data with third parties. The only exceptions are: (a) necessary requests to the Spotify API for the command to work; (b) legal obligations, such as a court order." },
         { h: "6. Retention", p: "We keep your data for as long as you use the service. When deletion is requested, we remove all your data from our database within 7 days." },
         { h: "7. Account deletion", p: 'To delete your data, contact us at <a href="https://github.com/Asrus21/Asrustify-command" target="_blank" style="color:#1ed760;">github.com/Asrus21/Asrustify-command</a> with your command_id. You can also <strong>revoke authorization directly on Spotify</strong> at <a href="https://www.spotify.com/account/apps" target="_blank" style="color:#1ed760;">spotify.com/account/apps</a> — after that, even if our database still has the token, it will no longer work.' },
-        { h: "8. Security", p: "Your data is stored in a PostgreSQL database hosted on secure servers (Railway). We use industry-standard practices to protect against unauthorized access, loss or alteration." },
+        { h: "8. Security", p: "Your data is stored in a PostgreSQL database hosted on secure servers (Neon). We use industry-standard practices to protect against unauthorized access, loss or alteration." },
         { h: "9. Spotify as beneficiary", p: "You acknowledge that Spotify is a third-party beneficiary of this Privacy Policy, with the right to enforce directly against you the terms related to the use of Spotify data." },
         { h: "10. Changes", p: "We may update this policy. Significant changes will be announced on this page. Continued use after an update means you accept the new terms." },
       ],
@@ -966,12 +989,8 @@ app.get("/privacy", (req, res) => {
   res.send(renderLegalPage("privacy", getLang(req)));
 });
 
-// ─── Start ────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-  console.log(`Registrar: ${BASE_URL}/register`);
-});
-
-initDB().catch((err) => {
-  console.error("Erro ao conectar ao banco:", err.message);
-});
+// ─── Export ───────────────────────────────────────────────────────────────────
+// A Vercel invoca este modulo como serverless function (sem app.listen).
+// A tabela e criada sob demanda pelo middleware ensureDB() na primeira
+// requisicao. Para rodar localmente: `npm run dev` (chama app.listen).
+module.exports = app;
