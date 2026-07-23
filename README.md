@@ -1,61 +1,62 @@
-# 🎵 Spotify Now Playing — Comando para Live
+# 🎵 Asrustify-command
 
-## Configuração
+Comando **"Tocando Agora"** para lives. O streamer autoriza sua conta Spotify
+via OAuth e recebe:
 
-### 1. Criar App no Spotify
-- Acesse https://developer.spotify.com/dashboard
-- Clique em **Create App**
-- Em **Redirect URIs**, adicione: `http://localhost:3000/callback`
-- Copie o **Client ID** e **Client Secret**
+1. Uma **URL de texto** para bots de chat (Nightbot / StreamElements) que
+   retorna a música atual formatada.
+2. Um **widget visual** para OBS Browser Source (capa do álbum, artistas,
+   próxima música da fila, barra de progresso e logo do Spotify).
 
-### 2. Configurar o .env
-```bash
-cp .env.example .env
+Interface bilíngue PT/EN com páginas de Termos de Uso e Política de Privacidade.
+
+## Arquitetura
+
+- **Vercel serverless functions** (Node runtime) — `api/index.js` exporta um app
+  Express (`module.exports = app`, sem `app.listen`).
+- **Neon Postgres** via `@neondatabase/serverless`.
+- Servido sob **`https://asrus.app/spotify/*`** através do proxy reverso (rewrite)
+  do hub `asrus.app`, que remove o prefixo `/spotify` antes de encaminhar.
+
 ```
-Preencha com suas credenciais:
-```
-SPOTIFY_CLIENT_ID=seu_client_id
-SPOTIFY_CLIENT_SECRET=seu_client_secret
-REDIRECT_URI=http://localhost:3000/callback
+Navegador -> https://asrus.app/spotify/<rota>
+          -> (rewrite do hub) -> https://api-spotify-command.vercel.app/<rota>
+          -> (rewrite do vercel.json) -> /api/index.js (Express)
 ```
 
-### 3. Instalar dependências e rodar
+## Variáveis de ambiente (Vercel → Settings → Environment Variables)
+
+| Variável | Valor |
+|----------|-------|
+| `SPOTIFY_CLIENT_ID` | Client ID do app no Spotify Developer Dashboard |
+| `SPOTIFY_CLIENT_SECRET` | Client Secret do mesmo app |
+| `REDIRECT_URI` | `https://asrus.app/spotify/callback` (idêntico ao do Dashboard, sem barra final) |
+| `BASE_URL` | `https://asrus.app/spotify` (sem barra final) |
+| `DATABASE_URL` | Injetada automaticamente ao conectar o Neon pela aba **Storage** |
+
+## Deploy
+
+1. Conectar o repositório como projeto na Vercel (Framework preset: **Other**, sem build command).
+2. Conectar o **Neon** pela aba **Storage** (injeta `DATABASE_URL`).
+3. Adicionar as demais variáveis de ambiente e fazer **Redeploy**.
+4. No **Spotify Dashboard**: conferir o Redirect URI e cadastrar os usuários no
+   **User Management** (Development Mode, máx. 25 contas).
+
+Não é necessário criar a tabela manualmente — o app roda
+`CREATE TABLE IF NOT EXISTS` sob demanda na primeira requisição (lazy init).
+
+## Rodar localmente
+
 ```bash
 npm install
-node index.js
+cp env.example .env   # preencha as credenciais + DATABASE_URL do Neon
+npm run dev           # http://localhost:3000/register
 ```
 
----
+## Uso na live
 
-## Como usar na Live
+- **Nightbot:** `$(urlfetch https://asrus.app/spotify/musica/<command_id>)`
+- **StreamElements:** `${customapi.https://asrus.app/spotify/musica/<command_id>}`
+- **OBS Browser Source:** `https://asrus.app/spotify/widget/<command_id>` (largura ~600, altura ~140)
 
-### Passo 1 — Autorizar
-Acesse no navegador:
-```
-http://localhost:3000/auth
-```
-Autorize o app. Feito isso, o token fica salvo.
-
-### Passo 2 — Comando !musica
-Configure no seu bot (Nightbot, StreamElements, etc) uma URL customizada apontando para:
-```
-http://localhost:3000/musica
-```
-
-A resposta será:
-```
-🎵 Tocando agora: Nome da Música - Artista | https://open.spotify.com/track/...
-```
-
----
-
-## Usando com Nightbot (URL fetch)
-No Nightbot, crie um comando com:
-```
-$(urlfetch http://SEU_IP:3000/musica)
-```
-
-## Usando com StreamElements
-```
-${customapi.http://SEU_IP:3000/musica}
-```
+O `<command_id>` é gerado ao autorizar em `https://asrus.app/spotify/register`.

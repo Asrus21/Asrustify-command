@@ -1,10 +1,10 @@
 {
-  "name": "spotify-nowplaying",
-  "version": "2.0.0",
-  "description": "Now Playing command for live streams (Last.fm)",
-  "main": "index.js",
+  "name": "asrustify-command",
+  "version": "3.0.0",
+  "description": "Comando 'Tocando Agora' para lives via Spotify OAuth: URL de texto para bots de chat (Nightbot/StreamElements) e widget visual para OBS.",
+  "main": "api/index.js",
   "scripts": {
-    "start": "node index.js"
+    "dev": "node -e \"require('./api/index.js').listen(3000, () => console.log('http://localhost:3000'))\""
   },
   "engines": {
     "node": ">=18.0.0"
@@ -13,10 +13,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
     "axios": "^1.15.2",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "pg": "^8.13.3",
     "uuid": "^11.1.0"
   }
 }
