@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
+const crypto = require("crypto");
 const { v4: uuidv4 } = require("uuid");
 const { neon } = require("@neondatabase/serverless");
 
@@ -18,6 +19,18 @@ const SPOTIFY_SCOPES = "user-read-currently-playing user-read-playback-state";
 
 // ─── Formato padrao do comando ────────────────────────────────────────────────
 const DEFAULT_FORMAT = "Tocando agora: {nome} - {artista} | {link}";
+
+// ─── Token do painel de solicitacoes ──────────────────────────────────────────
+// Sem ADMIN_TOKEN definido o painel fica inacessivel (fail closed).
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
+
+// ─── Escape de HTML (server-side) ─────────────────────────────────────────────
+// Obrigatorio ao renderizar qualquer texto vindo do usuario.
+function escapeHtml(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[c]);
+}
 
 // ─── Traducoes ────────────────────────────────────────────────────────────────
 const T = {
@@ -57,6 +70,16 @@ const T = {
     nothingPlaying: "😶 Não está sendo tocado nada agora.",
     invalidId: "ID inválido ou não autorizado.",
     errorFetch: "Erro ao buscar música.",
+    reqLink: "Não consegue autorizar? Solicite acesso",
+    reqTitle: "Solicitar acesso",
+    reqIntro: "O aplicativo está em modo de acesso por convite, com um limite de 25 contas. Para liberarmos a sua, informe o nome e o e-mail <strong>da sua conta do Spotify</strong> — precisa ser exatamente o e-mail com que você faz login no Spotify.",
+    reqNameLabel: "Seu nome",
+    reqEmailLabel: "E-mail da conta Spotify",
+    reqSubmit: "Enviar solicitação",
+    reqOkTitle: "✅ Solicitação enviada!",
+    reqOkText: "Recebemos seu pedido. Assim que a sua conta for liberada, é só voltar e autorizar normalmente.",
+    reqOkBack: "← Voltar ao registro",
+    reqErrInvalid: "Preencha o nome e um e-mail válido.",
   },
   en: {
     pageTitle: 'Asrustify-command',
@@ -94,6 +117,16 @@ const T = {
     nothingPlaying: "😶 Nothing is playing right now.",
     invalidId: "Invalid ID or not authorized.",
     errorFetch: "Error fetching the song.",
+    reqLink: "Can't authorize? Request access",
+    reqTitle: "Request access",
+    reqIntro: "This app is in invite-only mode, with a limit of 25 accounts. To get yours enabled, tell us the name and the e-mail <strong>of your Spotify account</strong> — it must be exactly the e-mail you use to log in to Spotify.",
+    reqNameLabel: "Your name",
+    reqEmailLabel: "Spotify account e-mail",
+    reqSubmit: "Send request",
+    reqOkTitle: "✅ Request sent!",
+    reqOkText: "We got your request. As soon as your account is enabled, just come back and authorize normally.",
+    reqOkBack: "← Back to register",
+    reqErrInvalid: "Please fill in your name and a valid e-mail.",
   },
 };
 
@@ -116,6 +149,18 @@ async function initDB() {
       refresh_token TEXT,
       format        TEXT,
       created_at    TIMESTAMP DEFAULT NOW()
+    )
+  `;
+  // Fila de solicitacoes de acesso. O Spotify nao expoe API para o User
+  // Management (Development Mode), entao os pedidos sao coletados aqui e o
+  // cadastro no Dashboard continua sendo manual.
+  await sql`
+    CREATE TABLE IF NOT EXISTS access_requests (
+      id           SERIAL PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      email        TEXT UNIQUE NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'pending',
+      created_at   TIMESTAMP DEFAULT NOW()
     )
   `;
 }
@@ -159,6 +204,33 @@ async function updateAccessToken(spotifyId, accessToken) {
 
 async function saveFormat(commandId, format) {
   await sql`UPDATE spotify_users SET format = ${format} WHERE command_id = ${commandId}`;
+}
+
+// ─── Solicitacoes de acesso ───────────────────────────────────────────────────
+// Reenviar com o mesmo e-mail atualiza o nome e devolve o pedido para a fila,
+// em vez de criar duplicata.
+async function createAccessRequest(displayName, email) {
+  await sql`
+    INSERT INTO access_requests (display_name, email)
+    VALUES (${displayName}, ${email})
+    ON CONFLICT (email) DO UPDATE
+    SET display_name = ${displayName}
+  `;
+}
+
+async function listAccessRequests() {
+  return await sql`
+    SELECT * FROM access_requests
+    ORDER BY (status = 'pending') DESC, created_at ASC
+  `;
+}
+
+async function setAccessRequestStatus(id, status) {
+  await sql`UPDATE access_requests SET status = ${status} WHERE id = ${id}`;
+}
+
+async function deleteAccessRequest(id) {
+  await sql`DELETE FROM access_requests WHERE id = ${id}`;
 }
 
 // ─── Refresh do token ─────────────────────────────────────────────────────────
@@ -259,8 +331,19 @@ function langSwitcher(currentPath, lang) {
 // Rotas estaticas (/register, /terms, /privacy) devem funcionar mesmo com o
 // banco fora do ar, entao sao puladas aqui.
 const DB_FREE_ROUTES = new Set(["/register", "/terms", "/privacy"]);
+
+function needsDB(req) {
+  if (DB_FREE_ROUTES.has(req.path)) return false;
+  // O formulario de solicitacao e estatico; so o POST grava no banco.
+  if (req.path === "/solicitar-acesso" && req.method === "GET") return false;
+  // O painel chama ensureDB() por conta propria, depois de autenticar, para
+  // que uma requisicao sem token nao dispare conexao com o banco.
+  if (req.path.startsWith("/admin/")) return false;
+  return true;
+}
+
 app.use(async (req, res, next) => {
-  if (DB_FREE_ROUTES.has(req.path)) return next();
+  if (!needsDB(req)) return next();
   try {
     await ensureDB();
     next();
@@ -337,6 +420,10 @@ app.get("/register", (req, res) => {
 
           <p style="color:#777;font-size:12px;text-align:center;margin-top:24px;">${t.authFooter}</p>
 
+          <p style="text-align:center;margin-top:18px;">
+            <a href="${BASE_URL}/solicitar-acesso?lang=${lang}" style="color:#888;font-size:12px;text-decoration:underline;">${t.reqLink}</a>
+          </p>
+
           <p style="color:#666;font-size:11px;text-align:center;margin-top:30px;">
             ${t.legalAgree}
             <a href="${BASE_URL}/terms?lang=${lang}" style="color:#999;text-decoration:underline;">${t.legalTerms}</a>
@@ -348,6 +435,221 @@ app.get("/register", (req, res) => {
       </body>
     </html>
   `);
+});
+
+// ─── ROTA: Solicitacao de acesso ──────────────────────────────────────────────
+// O Spotify nao expoe API para o User Management, entao aqui apenas coletamos
+// os dados. O cadastro no Developer Dashboard continua sendo manual.
+function renderRequestPage(lang, { error = "", name = "", email = "" } = {}) {
+  const t = T[lang];
+  const field = (label, inputName, type, value) => `
+    <label style="display:block;color:#aaa;font-size:14px;margin-top:16px;">${label}</label>
+    <input type="${type}" name="${inputName}" required maxlength="120" value="${escapeHtml(value)}"
+      style="width:100%;padding:12px;border-radius:8px;border:none;font-size:14px;box-sizing:border-box;margin-top:6px;">
+  `;
+
+  return `
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>${t.reqTitle} | ${t.pageTitle}</title>
+      </head>
+      <body style="font-family:sans-serif;background:#191414;color:#fff;margin:0;padding:40px 20px;">
+        <div style="max-width:520px;margin:0 auto;">
+          ${langSwitcher(`${BASE_URL}/solicitar-acesso`, lang)}
+          <h1 style="font-size:24px;text-align:center;">${t.reqTitle}</h1>
+          <div style="background:#282828;border-radius:12px;padding:20px;margin-top:20px;color:#bbb;font-size:14px;line-height:1.6;">
+            ${t.reqIntro}
+          </div>
+          ${error ? `<p style="background:#4a1f1f;color:#ffcccc;padding:12px;border-radius:8px;font-size:13px;margin-top:16px;">${escapeHtml(error)}</p>` : ""}
+          <form method="POST" action="${BASE_URL}/solicitar-acesso?lang=${lang}">
+            ${field(t.reqNameLabel, "display_name", "text", name)}
+            ${field(t.reqEmailLabel, "email", "email", email)}
+            <button type="submit" style="background:#1ed760;color:#000;padding:14px 28px;border:none;border-radius:30px;font-weight:bold;font-size:15px;cursor:pointer;margin-top:24px;width:100%;">
+              ${t.reqSubmit}
+            </button>
+          </form>
+          <p style="margin-top:28px;text-align:center;">
+            <a href="${BASE_URL}/register?lang=${lang}" style="color:#1ed760;text-decoration:none;font-size:13px;">${t.reqOkBack}</a>
+          </p>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+app.get("/solicitar-acesso", (req, res) => {
+  res.send(renderRequestPage(getLang(req)));
+});
+
+app.post("/solicitar-acesso", async (req, res) => {
+  const lang = getLang(req);
+  const t = T[lang];
+
+  const displayName = String(req.body.display_name || "").trim().slice(0, 120);
+  const email = String(req.body.email || "").trim().toLowerCase().slice(0, 120);
+  const emailOk = /^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(email);
+
+  if (!displayName || !emailOk) {
+    return res
+      .status(400)
+      .send(renderRequestPage(lang, { error: t.reqErrInvalid, name: displayName, email }));
+  }
+
+  try {
+    await ensureDB();
+    await createAccessRequest(displayName, email);
+  } catch (err) {
+    console.error("Erro ao salvar solicitacao:", err.message);
+    return res.status(500).send(renderRequestPage(lang, { error: t.errorFetch, name: displayName, email }));
+  }
+
+  res.send(`
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>${t.reqTitle} | ${t.pageTitle}</title>
+      </head>
+      <body style="font-family:sans-serif;background:#191414;color:#fff;margin:0;padding:60px 20px;text-align:center;">
+        <div style="max-width:520px;margin:0 auto;">
+          <h2>${t.reqOkTitle}</h2>
+          <p style="color:#bbb;font-size:14px;line-height:1.6;margin-top:16px;">${t.reqOkText}</p>
+          <p style="margin-top:32px;">
+            <a href="${BASE_URL}/register?lang=${lang}" style="color:#1ed760;text-decoration:none;font-size:14px;">${t.reqOkBack}</a>
+          </p>
+        </div>
+      </body>
+    </html>
+  `);
+});
+
+// ─── ROTA: Painel de solicitacoes (privado) ───────────────────────────────────
+// Protegido por ADMIN_TOKEN. Sem a variavel definida o painel fica desligado.
+function checkAdmin(req, res) {
+  if (!ADMIN_TOKEN) {
+    res.status(503).send("Painel indisponivel: ADMIN_TOKEN nao configurado.");
+    return false;
+  }
+  const provided = Buffer.from(String(req.query.token || req.body?.token || ""));
+  const expected = Buffer.from(ADMIN_TOKEN);
+  const ok =
+    provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+  if (!ok) {
+    // 404 em vez de 401 para nao revelar a existencia do painel.
+    res.status(404).send("Not found");
+    return false;
+  }
+  return true;
+}
+
+app.get("/admin/solicitacoes", async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+
+  const token = String(req.query.token || "");
+  let rows = [];
+  try {
+    await ensureDB();
+    rows = await listAccessRequests();
+  } catch (err) {
+    console.error("Erro ao listar solicitacoes:", err.message);
+    return res.status(500).send("Erro ao listar solicitacoes.");
+  }
+
+  const pending = rows.filter((r) => r.status === "pending");
+
+  const actionForm = (id, action, label, color) => `
+    <form method="POST" action="${BASE_URL}/admin/solicitacoes" style="display:inline;">
+      <input type="hidden" name="token" value="${escapeHtml(token)}">
+      <input type="hidden" name="id" value="${escapeHtml(id)}">
+      <input type="hidden" name="action" value="${action}">
+      <button type="submit" style="background:none;border:none;color:${color};font-size:12px;cursor:pointer;text-decoration:underline;padding:0 6px;">${label}</button>
+    </form>
+  `;
+
+  const rowsHtml = rows.length
+    ? rows.map((r) => `
+        <tr style="border-bottom:1px solid #333;">
+          <td style="padding:10px 8px;font-size:14px;">${escapeHtml(r.display_name)}</td>
+          <td style="padding:10px 8px;font-size:14px;font-family:monospace;">${escapeHtml(r.email)}</td>
+          <td style="padding:10px 8px;font-size:12px;color:${r.status === "pending" ? "#ffcc66" : "#1ed760"};">${escapeHtml(r.status)}</td>
+          <td style="padding:10px 8px;white-space:nowrap;">
+            ${r.status === "pending" ? actionForm(r.id, "approve", "marcar liberado", "#1ed760") : actionForm(r.id, "pending", "voltar p/ fila", "#ffcc66")}
+            ${actionForm(r.id, "delete", "excluir", "#ff6b6b")}
+          </td>
+        </tr>
+      `).join("")
+    : `<tr><td colspan="4" style="padding:20px 8px;color:#888;font-size:14px;">Nenhuma solicitação ainda.</td></tr>`;
+
+  // Bloco pronto para copiar e colar no User Management do Spotify Dashboard.
+  const copyBlock = pending.map((r) => `${r.display_name} <${r.email}>`).join("\n");
+
+  res.send(`<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="referrer" content="no-referrer">
+    <title>Solicitações | Asrustify-command</title>
+  </head>
+  <body style="font-family:sans-serif;background:#191414;color:#fff;margin:0;padding:40px 20px;">
+    <div style="max-width:860px;margin:0 auto;">
+      <h1 style="font-size:24px;">Solicitações de acesso</h1>
+      <p style="color:#888;font-size:13px;">
+        ${pending.length} pendente(s) — ${rows.length} no total. Limite do Development Mode: 25 contas.
+      </p>
+
+      <div style="background:#282828;border-radius:12px;padding:16px;margin:20px 0;">
+        <p style="color:#aaa;font-size:13px;margin-bottom:8px;">Pendentes (copie para o User Management do Spotify Dashboard):</p>
+        <textarea id="copyBox" readonly rows="${Math.max(2, Math.min(12, pending.length + 1))}"
+          style="width:100%;background:#111;color:#ddd;border:none;border-radius:8px;padding:12px;font-family:monospace;font-size:13px;box-sizing:border-box;">${escapeHtml(copyBlock)}</textarea>
+        <button onclick="navigator.clipboard.writeText(document.getElementById('copyBox').value)"
+          style="background:#1ed760;color:#000;border:none;border-radius:20px;padding:8px 18px;font-weight:bold;font-size:13px;cursor:pointer;margin-top:10px;">
+          Copiar
+        </button>
+        <a href="https://developer.spotify.com/dashboard" target="_blank"
+          style="color:#1ed760;font-size:13px;margin-left:14px;">Abrir o Spotify Dashboard →</a>
+      </div>
+
+      <table style="width:100%;border-collapse:collapse;background:#222;border-radius:12px;overflow:hidden;">
+        <thead>
+          <tr style="background:#2c2c2c;text-align:left;">
+            <th style="padding:10px 8px;font-size:13px;color:#aaa;">Nome</th>
+            <th style="padding:10px 8px;font-size:13px;color:#aaa;">E-mail</th>
+            <th style="padding:10px 8px;font-size:13px;color:#aaa;">Status</th>
+            <th style="padding:10px 8px;font-size:13px;color:#aaa;">Ações</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
+  </body>
+</html>`);
+});
+
+app.post("/admin/solicitacoes", async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+
+  const token = String(req.body?.token || "");
+  const id = parseInt(req.body?.id, 10);
+  const action = String(req.body?.action || "");
+
+  if (Number.isNaN(id)) return res.status(400).send("ID inválido.");
+
+  try {
+    await ensureDB();
+    if (action === "approve") await setAccessRequestStatus(id, "approved");
+    else if (action === "pending") await setAccessRequestStatus(id, "pending");
+    else if (action === "delete") await deleteAccessRequest(id);
+    else return res.status(400).send("Ação inválida.");
+  } catch (err) {
+    console.error("Erro ao atualizar solicitacao:", err.message);
+    return res.status(500).send("Erro ao atualizar solicitação.");
+  }
+
+  res.redirect(`${BASE_URL}/admin/solicitacoes?token=${encodeURIComponent(token)}`);
 });
 
 // ─── ROTA 2: Callback do Spotify ──────────────────────────────────────────────

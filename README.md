@@ -33,6 +33,22 @@ Navegador -> https://asrus.app/spotify/<rota>
 | `REDIRECT_URI` | `https://asrus.app/spotify/callback` (idêntico ao do Dashboard, sem barra final) |
 | `BASE_URL` | `https://asrus.app/spotify` (sem barra final) |
 | `DATABASE_URL` | Injetada automaticamente ao conectar o Neon pela aba **Storage** |
+| `ADMIN_TOKEN` | Token do painel de solicitações. Sem ele o painel fica desativado |
+
+## Fila de solicitações de acesso
+
+O app do Spotify está em **Development Mode** (máx. 25 contas) e o Spotify **não
+expõe API para o User Management** — o cadastro no Developer Dashboard é sempre
+manual. Para reduzir o trabalho, o projeto coleta os pedidos:
+
+- **`/solicitar-acesso`** — formulário público (PT/EN) onde a pessoa informa nome
+  e e-mail da conta Spotify. Reenviar com o mesmo e-mail atualiza o nome em vez
+  de duplicar.
+- **`/admin/solicitacoes?token=$ADMIN_TOKEN`** — painel privado com a lista de
+  pedidos, um bloco `Nome <email>` pronto para copiar para o User Management e
+  ações para marcar como liberado / devolver à fila / excluir.
+
+Requisições sem o token correto recebem **404** e não chegam a tocar no banco.
 
 ## Deploy
 
