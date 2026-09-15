@@ -90,6 +90,36 @@ function validaPedido(corpo) {
 }
 
 /**
+ * Quantas contas o Development Mode aceita.
+ *
+ * Em variável de ambiente porque o Spotify já mudou esse número uma vez (era 25,
+ * virou 5 em fevereiro de 2026) e vai poder mudar de novo. Cravar no código faria
+ * a próxima mudança virar deploy; assim vira uma linha na Vercel.
+ *
+ * O valor aqui é só para a conta do painel — quem manda de verdade é o
+ * dashboard do Spotify.
+ */
+function limiteDeContas(bruto) {
+  const n = Number.parseInt(String(bruto ?? ''), 10);
+  return Number.isInteger(n) && n > 0 ? n : 5;
+}
+
+/**
+ * O que o dashboard do Spotify pede, com os rótulos dele.
+ *
+ * "Full Name" recebe o usuário do Spotify quando a pessoa informou, e não o nome
+ * digitado: é o que identifica a conta sem ambiguidade, e foi assim que as
+ * contas já liberadas foram cadastradas. O nome digitado é só o rótulo humano —
+ * se duas pessoas se chamam "João", ele não distingue nada.
+ */
+function camposDoDashboard(pedido) {
+  return {
+    fullName: pedido?.usuario || pedido?.nome || '',
+    email: pedido?.email || '',
+  };
+}
+
+/**
  * Formulário público escreve no seu banco, então precisa de teto.
  *
  * O limite é por IP e por janela, não global: um teto global deixaria uma pessoa
@@ -101,6 +131,8 @@ function podePedir(pedidosRecentesDoIp) {
 }
 
 module.exports = {
+  limiteDeContas,
+  camposDoDashboard,
   NOME_MAX,
   EMAIL_MAX,
   USUARIO_MAX,
