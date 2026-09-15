@@ -34,6 +34,7 @@ Navegador -> https://asrus.app/spotify/<rota>
 | `BASE_URL` | `https://asrus.app/spotify` (sem barra final) |
 | `DATABASE_URL` | Injetada automaticamente ao conectar o Neon pela aba **Storage** |
 | `FILA_SECRET` | Segredo compartilhado com quem chama `POST /api/fila/:commandId`. Sem ele, a rota nega tudo — ela **modifica** o player. |
+| `SR_SECRET` | Segredo do comando `!sr` (`GET /sr/:commandId`). Separado do `FILA_SECRET` de propósito: este viaja na URL do comando do bot. Sem ele, a rota nega tudo. |
 | `PEDIDOS_USER` / `PEDIDOS_PASS` | Basic Auth da página `/pedidos`. Sem os dois, ela nega tudo — mostra e-mail de quem pediu acesso. |
 | `LIMITE_CONTAS` | Quantas contas o Development Mode aceita (padrão 5). Só alimenta o contador do painel — quem manda é o dashboard. |
 
@@ -103,6 +104,38 @@ token de usuário, a API já aplica o país da conta sozinha.
 O escopo é novo: quem autorizou antes desta versão precisa **reautorizar uma
 vez** para o pedido de música funcionar.
 
+## Comando `!sr` (`GET /sr/:commandId`)
+
+A mesma fila do resgate por pontos, pedida pelo chat. Existe porque bot de chat
+não manda header nem corpo: ele busca uma URL e publica o texto que voltar.
+
+```
+GET /sr/:commandId?q=<pedido>&k=<SR_SECRET>
+```
+
+Responde **texto puro** e **sempre 200**, inclusive ao recusar. Bot de chat
+engole o corpo de uma resposta com status de erro, e o espectador veria silêncio
+no lugar do motivo — que é justamente a parte útil ("não achei essa música", "o
+Spotify não está tocando").
+
+O segredo é próprio, e não o `FILA_SECRET`, porque este fica salvo no painel do
+bot, aparece em log de proxy e escapa numa gravação de tela editando comandos.
+Separados, vazar um não entrega o outro, e dá para trocar só este.
+
+**Quem pode pedir, e de quanto em quanto tempo, é decisão do bot.** O
+StreamElements tem cooldown e restrição por cargo; aqui não há como saber quem
+mandou, porque a requisição chega do servidor do bot e não do espectador.
+
+Configuração no bot (o `<command_id>` é o mesmo do `/musica`):
+
+- **StreamElements** — resposta do comando `!sr`:
+  `${customapi.https://asrus.app/spotify/sr/<command_id>?k=<SR_SECRET>&q=${queryescape ${1:}}}`
+- **Nightbot** — resposta do comando `!sr`:
+  `$(urlfetch https://asrus.app/spotify/sr/<command_id>?k=<SR_SECRET>&q=$(querystring))`
+
+O `queryescape`/`querystring` é obrigatório: sem ele, um pedido com espaço ou
+acento chega cortado.
+
 ## Pedido de acesso (Development Mode)
 
 Em Development Mode o Spotify **barra quem não está no User Management antes de
@@ -160,5 +193,6 @@ npm run dev           # http://localhost:3000/register
 - **Nightbot:** `$(urlfetch https://asrus.app/spotify/musica/<command_id>)`
 - **StreamElements:** `${customapi.https://asrus.app/spotify/musica/<command_id>}`
 - **OBS Browser Source:** `https://asrus.app/spotify/widget/<command_id>` (largura ~600, altura ~140)
+- **Pedir música pelo chat (`!sr`):** ver a seção do comando acima — a URL leva o `SR_SECRET`, então ela fica só no painel do bot
 
 O `<command_id>` é gerado ao autorizar em `https://asrus.app/spotify/register`.
