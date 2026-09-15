@@ -4,7 +4,8 @@
   "description": "Comando 'Tocando Agora' para lives via Spotify OAuth: URL de texto para bots de chat (Nightbot/StreamElements) e widget visual para OBS.",
   "main": "api/index.js",
   "scripts": {
-    "dev": "node -e \"require('./api/index.js').listen(3000, () => console.log('http://localhost:3000'))\""
+    "dev": "node -e \"require('./api/index.js').listen(3000, () => console.log('http://localhost:3000'))\"",
+    "test": "node test/fila.test.js"
   },
   "engines": {
     "node": ">=18.0.0"

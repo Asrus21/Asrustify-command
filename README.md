@@ -33,6 +33,7 @@ Navegador -> https://asrus.app/spotify/<rota>
 | `REDIRECT_URI` | `https://asrus.app/spotify/callback` (idêntico ao do Dashboard, sem barra final) |
 | `BASE_URL` | `https://asrus.app/spotify` (sem barra final) |
 | `DATABASE_URL` | Injetada automaticamente ao conectar o Neon pela aba **Storage** |
+| `FILA_SECRET` | Segredo compartilhado com quem chama `POST /api/fila/:commandId`. Sem ele, a rota nega tudo — ela **modifica** o player. |
 
 ## Deploy
 
@@ -44,6 +45,57 @@ Navegador -> https://asrus.app/spotify/<rota>
 
 Não é necessário criar a tabela manualmente — o app roda
 `CREATE TABLE IF NOT EXISTS` sob demanda na primeira requisição (lazy init).
+
+## Pedido de música na fila (`POST /api/fila/:commandId`)
+
+Adiciona uma música à fila de reprodução da conta autorizada. Quem chama é a
+automação de resgate de pontos do canal, não o navegador de ninguém.
+
+```
+POST /api/fila/<commandId>
+X-Fila-Secret: <FILA_SECRET>
+Content-Type: application/json
+
+{ "pedido": "Queen Bohemian Rhapsody" }
+{ "pedido": "https://open.spotify.com/intl-pt/track/4cOdK2wGLETKBW3PvgPWqT?si=x" }
+```
+
+Resposta de sucesso:
+
+```json
+{ "ok": true, "nome": "...", "artista": "...", "link": "...", "texto": "🎵 Na fila: ..." }
+```
+
+Na falha vem `{ "ok": false, "motivo": ..., "mensagem": ... }`, onde `mensagem`
+é a frase pronta para o chat. Os `motivo` possíveis: `sem_autorizacao`,
+`conta_nao_encontrada`, `pedido_invalido`, `nao_encontrada`, `sem_dispositivo`,
+`sem_premium`, `autorizacao`, `limite`, `erro`.
+
+O `commandId` **não** autoriza sozinho: ele viaja dentro de comandos de chat e é
+praticamente público. Um endpoint que modifica o player aberto ao mundo seria
+bem pior do que um endpoint fora do ar, então sem `FILA_SECRET` configurado a
+rota nega tudo.
+
+### O que o Spotify exige, e que não depende de código
+
+| Exigência | O que acontece sem ela |
+|---|---|
+| **Spotify Premium** na conta autorizada | `403` → `sem_premium` |
+| **Dispositivo ativo** (Spotify aberto e tocando) | `404` → `sem_dispositivo` |
+| Escopo `user-modify-playback-state` | `403`; exige reautorizar em `/register` |
+| Conta cadastrada no *User Management* do app | o OAuth nem completa |
+
+O escopo é novo: quem autorizou antes desta versão precisa **reautorizar uma
+vez** para o pedido de música funcionar.
+
+## Testes
+
+```bash
+npm test
+```
+
+Exercita a lógica pura de `api/fila.js` — interpretação do pedido e tradução dos
+erros do Spotify — sem Express, sem banco e sem rede.
 
 ## Rodar localmente
 
