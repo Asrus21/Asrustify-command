@@ -84,10 +84,21 @@ rota nega tudo.
 
 | Exigência | O que acontece sem ela |
 |---|---|
-| **Spotify Premium** na conta autorizada | `403` → `sem_premium` |
+| **Spotify Premium** na conta autorizada | `403 Premium required` → `sem_premium` |
 | **Dispositivo ativo** (Spotify aberto e tocando) | `404` → `sem_dispositivo` |
-| Escopo `user-modify-playback-state` | `403`; exige reautorizar em `/register` |
+| Escopo `user-modify-playback-state` | `403 Insufficient client scope` → `sem_escopo`; exige reautorizar em `/register` |
 | Conta cadastrada no *User Management* do app | o OAuth nem completa |
+
+O Spotify usa **o mesmo 403** para todas essas situações — e ainda para
+restrição de dispositivo (`Restriction violated`). Por isso `explicaErroDaFila`
+decide pela mensagem, não pelo status, e devolve o texto cru do Spotify quando
+não reconhece: um 403 traduzido como "falta Premium" manda procurar defeito na
+assinatura enquanto o problema é outro.
+
+Pelo mesmo motivo a busca e a leitura da faixa **não passam `market`**:
+`market=from_token` exige o escopo `user-read-private`, que este app não pede, e
+derrubava o pedido com `Insufficient client scope` antes de chegar à fila. Com
+token de usuário, a API já aplica o país da conta sozinha.
 
 O escopo é novo: quem autorizou antes desta versão precisa **reautorizar uma
 vez** para o pedido de música funcionar.

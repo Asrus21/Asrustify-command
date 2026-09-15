@@ -65,8 +65,10 @@ function interpretaPedido(bruto) {
  * o chat.
  *
  * O Spotify responde 403 e 404 para situações que não têm nada de "proibido" nem
- * de "não encontrado": 403 é conta Free, 404 é Spotify fechado. Repassar cru
- * faria o streamer procurar defeito na configuração.
+ * de "não encontrado": 404 é Spotify fechado, e o 403 é AMBÍGUO — conta Free,
+ * token sem escopo ou restrição do dispositivo, tudo com o mesmo código. Por
+ * isso quem decide aqui é a mensagem, e o que não for reconhecido volta com o
+ * texto do Spotify em vez de um palpite.
  */
 function explicaErroDaFila(status, mensagemDoSpotify) {
   const msg = String(mensagemDoSpotify ?? '');
@@ -80,10 +82,31 @@ function explicaErroDaFila(status, mensagemDoSpotify) {
         'e dê play em qualquer coisa — depois a fila volta a funcionar.',
     };
   }
-  if (status === 403 || baixa.includes('premium')) {
+  // O 403 é decidido pela MENSAGEM, nunca pelo status sozinho. O Spotify usa o
+  // mesmo 403 para conta Free, para token sem escopo e para restrição de
+  // dispositivo; chamar os três de "falta Premium" mandava o streamer conferir
+  // a assinatura — que estava certa — enquanto o defeito era outro.
+  if (baixa.includes('premium')) {
     return {
       motivo: 'sem_premium',
       mensagem: 'Pôr música na fila exige Spotify Premium na conta do streamer.',
+    };
+  }
+  if (baixa.includes('scope')) {
+    return {
+      motivo: 'sem_escopo',
+      mensagem:
+        'Falta uma permissão na autorização do Spotify. O streamer precisa ' +
+        'reautorizar em asrus.app/spotify.',
+    };
+  }
+  if (baixa.includes('restriction')) {
+    return {
+      motivo: 'restricao',
+      mensagem:
+        'O Spotify recusou a fila neste dispositivo — costuma ser sessão privada, ' +
+        'anúncio tocando ou um dispositivo que não aceita fila. Tente tocar pelo ' +
+        'app do celular ou do computador.',
     };
   }
   if (status === 401) {
@@ -95,9 +118,13 @@ function explicaErroDaFila(status, mensagemDoSpotify) {
   if (status === 429) {
     return { motivo: 'limite', mensagem: 'Muitos pedidos em pouco tempo. Espere um pouco.' };
   }
+  // Recusa que não sabemos traduzir: repassar o texto do Spotify é melhor do
+  // que um "não deu" que não diz nada. É por onde a investigação começa.
   return {
     motivo: 'erro',
-    mensagem: msg ? `O Spotify recusou: ${msg}` : 'Não deu para pôr na fila.',
+    mensagem: msg
+      ? `O Spotify recusou: ${msg}`
+      : `O Spotify recusou o pedido${status ? ` (HTTP ${status})` : ''}.`,
   };
 }
 
