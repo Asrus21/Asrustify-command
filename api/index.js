@@ -26,6 +26,7 @@ const {
 } = require("./acesso");
 const {
   SPOTIFY_SCOPES,
+  consultasDeBusca,
   interpretaPedido,
   explicaErroDaFila,
   linhaDaFila,
@@ -1090,12 +1091,23 @@ function segredoConfere(recebido) {
 // "Insufficient client scope" ANTES de qualquer tentativa de enfileirar, e o
 // pedido morria na hora de resolver a faixa, por nome ou por link. Omitir o
 // market não perde nada: com token de usuário, a API já aplica o país da conta.
-async function buscaFaixa(token, termo) {
+async function buscaUmaConsulta(token, q) {
   const res = await axios.get("https://api.spotify.com/v1/search", {
-    params: { q: termo, type: "track", limit: 1 },
+    params: { q, type: "track", limit: 1 },
     headers: { Authorization: `Bearer ${token}` },
   });
   return res.data?.tracks?.items?.[0] || null;
+}
+
+// Tenta as leituras estruturadas primeiro ("zero by lmyk" -> track + artist) e
+// só então o texto cru. Ver consultasDeBusca em fila.js: sem isso, o "by" vira
+// termo de busca e o primeiro resultado pode ser qualquer coisa.
+async function buscaFaixa(token, termo) {
+  for (const q of consultasDeBusca(termo)) {
+    const faixa = await buscaUmaConsulta(token, q);
+    if (faixa) return faixa;
+  }
+  return null;
 }
 
 // Mesmo motivo do buscaFaixa acima: nada de market=from_token.
