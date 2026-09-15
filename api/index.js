@@ -9,12 +9,18 @@ const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
 app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
 // ─── Credenciais do Spotify ───────────────────────────────────────────────────
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI || `${BASE_URL}/callback`;
-const SPOTIFY_SCOPES = "user-read-currently-playing user-read-playback-state";
+const {
+  SPOTIFY_SCOPES,
+  interpretaPedido,
+  explicaErroDaFila,
+  linhaDaFila,
+} = require("./fila");
 
 // ─── Formato padrao do comando ────────────────────────────────────────────────
 const DEFAULT_FORMAT = "Tocando agora: {nome} - {artista} | {link}";
@@ -29,7 +35,7 @@ const T = {
     step1Text: "Se você ainda não tem, crie uma conta gratuita no Spotify. Funciona com conta Free ou Premium.",
     step1Link: "➜ Criar conta no Spotify",
     step2Title: "Autorize o acesso",
-    step2Text: "Clique no botão abaixo. Você será redirecionado para o Spotify para autorizar este aplicativo a ler somente a música que está tocando agora. Não temos acesso a senhas, playlists, biblioteca ou dados pessoais.",
+    step2Text: "Clique no botão abaixo. Você será redirecionado para o Spotify para autorizar este aplicativo a ler a música que está tocando agora e a adicionar músicas à sua fila de reprodução. Não temos acesso a senhas, playlists, biblioteca ou dados pessoais.",
     step3Title: "Use o link na sua live",
     step3Text: "Após autorizar, você receberá um link único para colocar no seu bot (Nightbot, StreamElements, etc.). O comando vai mostrar em tempo real a música que está tocando.",
     authButton: "✅ Autorizar com Spotify",
@@ -66,7 +72,7 @@ const T = {
     step1Text: "If you don't have one yet, create a free Spotify account. It works with Free or Premium accounts.",
     step1Link: "➜ Create a Spotify account",
     step2Title: "Authorize access",
-    step2Text: "Click the button below. You will be redirected to Spotify to authorize this application to read only the song that is currently playing. We do not have access to passwords, playlists, library or personal data.",
+    step2Text: "Click the button below. You will be redirected to Spotify to authorize this application to read the song that is currently playing and to add songs to your playback queue. We do not have access to passwords, playlists, library or personal data.",
     step3Title: "Use the link on your stream",
     step3Text: "After authorizing, you will get a unique link to use on your bot (Nightbot, StreamElements, etc.). The command will show the song that is playing in real time.",
     authButton: "✅ Authorize with Spotify",
@@ -855,7 +861,7 @@ const LEGAL = {
       updated: "Última atualização: 26 de maio de 2026",
       sections: [
         { h: "1. Sobre este serviço", p: "Este site oferece um comando para lives chamado <strong>Asrustify-command</strong>, que exibe a música que o streamer está ouvindo no Spotify. Ao usar este site você concorda com estes Termos de Uso. Se não concordar, não utilize o serviço." },
-        { h: "2. Como funciona", p: "Você autoriza este site a ler apenas a música que está tocando agora na sua conta Spotify (escopos <code>user-read-currently-playing</code> e <code>user-read-playback-state</code>). Não temos acesso a senhas, playlists, biblioteca, e-mail ou dados financeiros." },
+        { h: "2. Como funciona", p: "Você autoriza este site a ler a música que está tocando agora na sua conta Spotify (escopos <code>user-read-currently-playing</code> e <code>user-read-playback-state</code>) e a adicionar músicas à sua fila de reprodução (escopo <code>user-modify-playback-state</code>). Esse último existe para o pedido de música por pontos do canal: ele adiciona à fila e nada mais — não pausa, não troca de música e não altera o volume. Não temos acesso a senhas, playlists, biblioteca, e-mail ou dados financeiros." },
         { h: "3. Uso permitido", p: "É permitido o uso pessoal e não comercial. Você não pode revender, redistribuir, fazer engenharia reversa ou tentar contornar mecanismos de segurança do site." },
         { h: "4. Serviços de terceiros", p: "Este site usa a API do <strong>Spotify</strong>. Não somos donos nem controlamos o Spotify. Indisponibilidades, mudanças ou limitações impostas pelo Spotify estão fora do nosso controle e não somos responsáveis por elas." },
         { h: "5. Limitação de responsabilidade", p: "O serviço é oferecido <em>\"como está\"</em>, sem garantias de qualquer tipo. Não nos responsabilizamos por perdas, danos ou interrupções decorrentes do uso do site ou dos serviços de terceiros." },
@@ -879,7 +885,7 @@ const LEGAL = {
       updated: "Last updated: May 26, 2026",
       sections: [
         { h: "1. About this service", p: "This website provides a stream command called <strong>Asrustify-command</strong>, which displays the song the streamer is listening to on Spotify. By using this site, you agree to these Terms of Use. If you do not agree, do not use the service." },
-        { h: "2. How it works", p: "You authorize this site to read only the song currently playing on your Spotify account (scopes <code>user-read-currently-playing</code> and <code>user-read-playback-state</code>). We do not have access to passwords, playlists, library, e-mail or financial data." },
+        { h: "2. How it works", p: "You authorize this site to read the song currently playing on your Spotify account (scopes <code>user-read-currently-playing</code> and <code>user-read-playback-state</code>) and to add songs to your playback queue (scope <code>user-modify-playback-state</code>). The latter exists for channel-points song requests: it adds to the queue and nothing else — it does not pause, skip or change the volume. We do not have access to passwords, playlists, library, e-mail or financial data." },
         { h: "3. Permitted use", p: "Personal, non-commercial use only. You may not resell, redistribute, reverse-engineer or attempt to bypass any security measures of this site." },
         { h: "4. Third-party services", p: "This site uses the <strong>Spotify</strong> API. We do not own or control Spotify. Any downtime, changes or limitations imposed by Spotify are outside our control and we are not liable for them." },
         { h: "5. Limitation of liability", p: "The service is provided <em>\"as is\"</em>, without warranties of any kind. We are not liable for losses, damages or disruptions arising from the use of this site or third-party services." },
@@ -913,7 +919,7 @@ const LEGAL = {
             <li><strong>O formato escolhido</strong> — texto que define como o comando aparece na sua live.</li>
           </ul>
           Não coletamos seu e-mail, senha, dados financeiros nem qualquer informação pessoal além do necessário.` },
-        { h: "3. O que NÃO coletamos", p: "Não acessamos suas playlists, biblioteca, histórico de músicas, dados de cartão, e-mail ou contatos. Os escopos solicitados ao Spotify se limitam a <code>user-read-currently-playing</code> e <code>user-read-playback-state</code> — apenas a música atualmente tocando." },
+        { h: "3. O que NÃO coletamos", p: "Não acessamos suas playlists, biblioteca, histórico de músicas, dados de cartão, e-mail ou contatos. Os escopos solicitados ao Spotify se limitam a <code>user-read-currently-playing</code>, <code>user-read-playback-state</code> e <code>user-modify-playback-state</code> — a música atualmente tocando e a adição de músicas à fila." },
         { h: "4. Como usamos seus dados", p: "Os dados coletados são usados exclusivamente para fazer o comando funcionar. Não usamos para análises, propaganda, perfilamento ou qualquer outra finalidade." },
         { h: "5. Compartilhamento", p: "Não vendemos nem compartilhamos seus dados com terceiros. As únicas exceções são: (a) consultas necessárias à API do Spotify para o funcionamento do comando; (b) obrigações legais, como ordem judicial." },
         { h: "6. Retenção", p: "Mantemos seus dados enquanto você usar o serviço. Quando solicitada a exclusão, removemos todos os seus dados do nosso banco em até 7 dias." },
@@ -936,7 +942,7 @@ const LEGAL = {
             <li><strong>The format you chose</strong> — text that defines how the command appears in your stream.</li>
           </ul>
           We do not collect your email, password, financial data or any other personal information.` },
-        { h: "3. What we do NOT collect", p: "We do not access your playlists, library, listening history, card data, email or contacts. The scopes requested from Spotify are limited to <code>user-read-currently-playing</code> and <code>user-read-playback-state</code> — only the song currently playing." },
+        { h: "3. What we do NOT collect", p: "We do not access your playlists, library, listening history, card data, email or contacts. The scopes requested from Spotify are limited to <code>user-read-currently-playing</code>, <code>user-read-playback-state</code> and <code>user-modify-playback-state</code> — the song currently playing and adding songs to the queue." },
         { h: "4. How we use your data", p: "The collected data is used exclusively to make the command work. We do not use it for analytics, advertising, profiling or any other purpose." },
         { h: "5. Sharing", p: "We do not sell or share your data with third parties. The only exceptions are: (a) necessary requests to the Spotify API for the command to work; (b) legal obligations, such as a court order." },
         { h: "6. Retention", p: "We keep your data for as long as you use the service. When deletion is requested, we remove all your data from our database within 7 days." },
@@ -980,6 +986,124 @@ function renderLegalPage(docKey, lang) {
     </html>
   `;
 }
+
+// ─── ROTA: pôr música na fila do Spotify ──────────────────────────────────────
+//
+// Quem chama é o automatizador do resgate de pontos da Twitch, não o navegador
+// de ninguém. Por isso o `commandId` sozinho NÃO autoriza: ele viaja dentro de
+// comandos de chat e é praticamente público. A escrita exige o segredo
+// compartilhado, e sem ele configurado a rota nega tudo (fail-closed) — um
+// endpoint que MODIFICA o player aberto ao mundo seria bem pior do que um
+// endpoint fora do ar.
+
+const crypto = require("crypto");
+
+function segredoConfere(recebido) {
+  const esperado = process.env.FILA_SECRET || "";
+  if (!esperado) return false; // fail-closed: sem segredo, ninguém entra
+  const a = Buffer.from(String(recebido || ""), "utf8");
+  const b = Buffer.from(esperado, "utf8");
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+async function buscaFaixa(token, termo) {
+  const res = await axios.get("https://api.spotify.com/v1/search", {
+    params: { q: termo, type: "track", limit: 1, market: "from_token" },
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return res.data?.tracks?.items?.[0] || null;
+}
+
+async function leFaixa(token, id) {
+  const res = await axios.get(`https://api.spotify.com/v1/tracks/${id}`, {
+    params: { market: "from_token" },
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return res.data || null;
+}
+
+async function poeNaFila(token, uri) {
+  await axios.post("https://api.spotify.com/v1/me/player/queue", null, {
+    params: { uri },
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+/** Resolve a faixa e enfileira. Separado para poder rodar de novo após refresh. */
+async function enfileira(token, pedido) {
+  const faixa =
+    pedido.tipo === "faixa"
+      ? await leFaixa(token, pedido.id)
+      : await buscaFaixa(token, pedido.termo);
+
+  if (!faixa || !faixa.uri) return { achou: false };
+
+  await poeNaFila(token, faixa.uri);
+
+  return {
+    achou: true,
+    nome: faixa.name,
+    artista: (faixa.artists || []).map((a) => a.name).join(", "),
+    link: faixa.external_urls?.spotify || `https://open.spotify.com/track/${faixa.id}`,
+  };
+}
+
+app.post("/api/fila/:commandId", async (req, res) => {
+  if (!segredoConfere(req.get("X-Fila-Secret"))) {
+    return res.status(403).json({ ok: false, motivo: "sem_autorizacao" });
+  }
+
+  const user = await getUserByCommandId(req.params.commandId);
+  if (!user || !user.access_token) {
+    return res.status(404).json({ ok: false, motivo: "conta_nao_encontrada" });
+  }
+
+  const pedido = interpretaPedido(req.body?.pedido);
+  if (pedido.erro) {
+    return res.status(422).json({ ok: false, motivo: "pedido_invalido", mensagem: pedido.erro });
+  }
+
+  try {
+    let r;
+    try {
+      r = await enfileira(user.access_token, pedido);
+    } catch (err) {
+      if (err.response?.status !== 401) throw err;
+      const novo = await refreshAccessToken(user.spotify_id, user.refresh_token);
+      r = await enfileira(novo, pedido);
+    }
+
+    if (!r.achou) {
+      return res.status(404).json({
+        ok: false,
+        motivo: "nao_encontrada",
+        mensagem: "Não achei essa música no Spotify. Tente o nome com o artista, ou cole o link.",
+      });
+    }
+
+    return res.json({
+      ok: true,
+      nome: r.nome,
+      artista: r.artista,
+      link: r.link,
+      texto: linhaDaFila(r.nome, r.artista),
+    });
+  } catch (err) {
+    const status = err.response?.status || 0;
+    const msgDoSpotify =
+      err.response?.data?.error?.message || err.response?.data?.error || err.message;
+    const { motivo, mensagem } = explicaErroDaFila(status, msgDoSpotify);
+    console.error("Falha ao enfileirar:", status, msgDoSpotify);
+    // O status HTTP daqui é para quem chama programaticamente; a mensagem é a
+    // que vai ao chat.
+    return res.status(status >= 400 && status < 500 ? status : 502).json({
+      ok: false,
+      motivo,
+      mensagem,
+    });
+  }
+});
 
 app.get("/terms", (req, res) => {
   res.send(renderLegalPage("terms", getLang(req)));
