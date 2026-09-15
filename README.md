@@ -42,7 +42,9 @@ Navegador -> https://asrus.app/spotify/<rota>
 2. Conectar o **Neon** pela aba **Storage** (injeta `DATABASE_URL`).
 3. Adicionar as demais variáveis de ambiente e fazer **Redeploy**.
 4. No **Spotify Dashboard**: conferir o Redirect URI e cadastrar os usuários no
-   **User Management** (Development Mode, máx. 25 contas).
+   **User Management**. O teto de contas mudou em fevereiro de 2026 (era 25, virou
+   5 para apps novos) e apps antigos podem estar em outra situação — o número que
+   vale é o que o SEU dashboard mostra.
 
 Não é necessário criar a tabela manualmente — o app roda
 `CREATE TABLE IF NOT EXISTS` sob demanda na primeira requisição (lazy init).
@@ -111,9 +113,13 @@ parar na tela dele.
 O IP é guardado como **hash**, não em claro: ele serve só para contar pedidos e
 segurar spam, e o hash conta igual.
 
-**O teto de 25 contas do Development Mode continua valendo.** Isto automatiza o
-processo de juntar os dados, não o limite — passar disso exige *quota extension*
-junto ao Spotify.
+**O teto de contas do Development Mode continua valendo.** Isto automatiza o
+processo de juntar os dados, não o limite.
+
+E não há como escapar dele por cima: desde 15/05/2025 o Spotify só aceita pedido
+de *extended quota* de **organização registrada com 250 mil usuários ativos
+mensais** — pessoa física não se candidata. Na prática, para um app individual a
+lista de liberados é o único caminho, e o teto é o que o seu dashboard disser.
 
 ## Testes
 

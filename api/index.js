@@ -1426,8 +1426,9 @@ app.get("/pedidos", async (req, res) => {
           <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer">
           developer.spotify.com/dashboard</a> → seu app → <strong>User Management</strong>,
           depois marque aqui.</p>
-       <div class="aviso">O Development Mode aceita no máximo <strong>25 contas</strong>.
-         Hoje: ${atendidos.length} marcadas como adicionadas.</div>
+       <div class="aviso">O Development Mode tem teto de contas, e ele mudou em
+         fevereiro de 2026 — o número que vale é o que o seu dashboard mostra.
+         Aqui: <strong>${atendidos.length}</strong> marcadas como adicionadas.</div>
        <h2 style="font-size:16px;margin:24px 0 0">Esperando (${pendentes.length})</h2>
        ${
          pendentes.length === 0
