@@ -16,6 +16,13 @@ const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI || `${BASE_URL}/callback`;
 const {
+  escapaHtml,
+  validaPedido,
+  podePedir,
+  JANELA_MINUTOS,
+  LIMITE_POR_IP,
+} = require("./acesso");
+const {
   SPOTIFY_SCOPES,
   interpretaPedido,
   explicaErroDaFila,
@@ -40,6 +47,9 @@ const T = {
     step3Text: "Após autorizar, você receberá um link único para colocar no seu bot (Nightbot, StreamElements, etc.). O comando vai mostrar em tempo real a música que está tocando.",
     authButton: "✅ Autorizar com Spotify",
     authFooter: "A autorização é segura e segue o padrão OAuth oficial do Spotify.",
+    blockedTitle: "O Spotify disse que sua conta não está liberada?",
+    blockedText: "O app está em modo de desenvolvimento, e cada conta precisa ser liberada uma a uma. Deixe seu nome e e-mail que eu libero.",
+    blockedLink: "➜ Pedir acesso",
     legalAgree: "Ao continuar você aceita os",
     legalTerms: "Termos de Uso",
     legalAnd: "e a",
@@ -77,6 +87,9 @@ const T = {
     step3Text: "After authorizing, you will get a unique link to use on your bot (Nightbot, StreamElements, etc.). The command will show the song that is playing in real time.",
     authButton: "✅ Authorize with Spotify",
     authFooter: "Authorization is secure and follows Spotify's official OAuth standard.",
+    blockedTitle: "Did Spotify say your account is not allowed?",
+    blockedText: "The app is in development mode, and each account has to be allowed one by one. Leave your name and e-mail and I will add you.",
+    blockedLink: "➜ Request access",
     legalAgree: "By continuing you accept the",
     legalTerms: "Terms of Use",
     legalAnd: "and the",
@@ -123,6 +136,27 @@ async function initDB() {
       format        TEXT,
       created_at    TIMESTAMP DEFAULT NOW()
     )
+  `;
+
+  // Pedidos de acesso: quem tentou autorizar e foi barrado pelo Development
+  // Mode do Spotify. Existe porque o Spotify não emite token para quem não está
+  // no User Management, então o e-mail só pode vir digitado.
+  await sql`
+    CREATE TABLE IF NOT EXISTS spotify_pedidos (
+      id          SERIAL PRIMARY KEY,
+      nome        TEXT NOT NULL,
+      email       TEXT NOT NULL,
+      usuario     TEXT,
+      ip_hash     TEXT,
+      criado_em   TIMESTAMP DEFAULT NOW(),
+      atendido_em TIMESTAMP
+    )
+  `;
+  // Um e-mail que pede duas vezes não vira duas linhas: a segunda atualiza a
+  // primeira. Sem isto, alguém que tenta de novo depois de meia hora te faria
+  // adicionar a mesma conta duas vezes.
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS spotify_pedidos_email_idx ON spotify_pedidos (email)
   `;
 }
 
@@ -264,9 +298,29 @@ function langSwitcher(currentPath, lang) {
 // ─── Middleware: garante o banco antes das rotas que dependem dele ────────────
 // Rotas estaticas (/register, /terms, /privacy) devem funcionar mesmo com o
 // banco fora do ar, entao sao puladas aqui.
-const DB_FREE_ROUTES = new Set(["/register", "/terms", "/privacy"]);
+// "/acesso" entra aqui porque o GET dele é só um formulário: ele precisa
+// aparecer justamente quando algo está errado, e o POST chama ensureDB() por
+// conta própria antes de gravar.
+const DB_FREE_ROUTES = new Set(["/register", "/terms", "/privacy", "/acesso"]);
+
+/**
+ * As rotas que checam credencial ANTES de tocar no banco.
+ *
+ * Duas razões. A primeira é honestidade da resposta: com o middleware na
+ * frente, uma instabilidade do banco fazia /pedidos responder 500 "Database
+ * error" em vez de pedir a senha, o que esconde o estado real de quem está
+ * olhando. A segunda é que pedido sem credencial não deveria custar uma conexão
+ * de banco — deixar qualquer um da internet nos fazer abrir conexão é carga de
+ * graça para quem quiser derrubar o resto.
+ *
+ * Elas chamam ensureDB() por conta própria, depois de autorizar.
+ */
+function autenticaAntesDoBanco(caminho) {
+  return caminho.startsWith("/api/fila/") || caminho.startsWith("/pedidos");
+}
+
 app.use(async (req, res, next) => {
-  if (DB_FREE_ROUTES.has(req.path)) return next();
+  if (DB_FREE_ROUTES.has(req.path) || autenticaAntesDoBanco(req.path)) return next();
   try {
     await ensureDB();
     next();
@@ -343,6 +397,13 @@ app.get("/register", (req, res) => {
 
           <p style="color:#777;font-size:12px;text-align:center;margin-top:24px;">${t.authFooter}</p>
 
+          <div style="background:#282828;border-radius:12px;padding:16px;margin-top:20px;">
+            <h3 style="margin:0 0 6px;font-size:15px;">${t.blockedTitle}</h3>
+            <p style="color:#bbb;font-size:13px;margin:6px 0;">${t.blockedText}</p>
+            <a href="acesso?lang=${lang}"
+              style="color:#1ed760;font-size:14px;font-weight:bold;text-decoration:none;">${t.blockedLink}</a>
+          </div>
+
           <p style="color:#666;font-size:11px;text-align:center;margin-top:30px;">
             ${t.legalAgree}
             <a href="${BASE_URL}/terms?lang=${lang}" style="color:#999;text-decoration:underline;">${t.legalTerms}</a>
@@ -367,7 +428,14 @@ app.get("/callback", async (req, res) => {
     if (parsed.lang === "en") lang = "en";
   } catch {}
 
-  if (!code) return res.send("Autorização negada.");
+  // O Spotify recusa quem não está no User Management. Quando ele devolve o
+  // erro aqui (em vez de parar na tela dele), a pessoa cai neste ponto sem
+  // nenhuma pista do que fazer — e "Autorização negada" faz parecer que ela
+  // clicou errado. Mandar para o formulário é a única saída real que existe.
+  if (req.query.error || !code) {
+    const motivo = String(req.query.error || "");
+    return res.redirect(`${BASE_URL}/acesso?motivo=${encodeURIComponent(motivo)}`);
+  }
 
   try {
     const tokenRes = await axios.post(
@@ -401,6 +469,14 @@ app.get("/callback", async (req, res) => {
   } catch (err) {
     const detail = err.response?.data || err.message;
     console.error("Erro no callback:", JSON.stringify(detail));
+
+    // A recusa por conta fora do User Management chega como texto do Spotify.
+    // Repassar o JSON cru manda a pessoa procurar defeito onde não tem: o que
+    // falta é ela estar na lista, e o formulário é o caminho para entrar nela.
+    const texto = JSON.stringify(detail).toLowerCase();
+    if (texto.includes("not registered") || texto.includes("user may not")) {
+      return res.redirect(`${BASE_URL}/acesso?motivo=nao_registrado`);
+    }
     res.send(`Erro ao obter token: ${JSON.stringify(detail)}`);
   }
 });
@@ -1054,6 +1130,12 @@ app.post("/api/fila/:commandId", async (req, res) => {
     return res.status(403).json({ ok: false, motivo: "sem_autorizacao" });
   }
 
+  try {
+    await ensureDB(); // esta rota pula o middleware do banco: ver autenticaAntesDoBanco
+  } catch {
+    return res.status(503).json({ ok: false, motivo: "erro", mensagem: "Banco indisponível." });
+  }
+
   const user = await getUserByCommandId(req.params.commandId);
   if (!user || !user.access_token) {
     return res.status(404).json({ ok: false, motivo: "conta_nao_encontrada" });
@@ -1103,6 +1185,275 @@ app.post("/api/fila/:commandId", async (req, res) => {
       mensagem,
     });
   }
+});
+
+// ─── Pedido de acesso (Development Mode do Spotify) ───────────────────────────
+//
+// O Spotify em Development Mode barra quem não está no User Management ANTES de
+// emitir token. Não há /v1/me, então não há e-mail para capturar: ele precisa
+// ser digitado. Estas rotas existem para que isso não dependa de a pessoa
+// descobrir sozinha como te achar.
+
+const ESTILO_PAGINA = `
+  body{background:#121212;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+       margin:0;padding:24px;line-height:1.5}
+  .caixa{max-width:560px;margin:0 auto;background:#1e1e1e;border-radius:14px;padding:28px}
+  h1{font-size:22px;margin:0 0 6px}
+  p{color:#b3b3b3;margin:0 0 16px}
+  label{display:block;margin:14px 0 4px;font-size:13px;color:#b3b3b3}
+  input{width:100%;box-sizing:border-box;padding:11px;border-radius:8px;border:1px solid #333;
+        background:#121212;color:#fff;font-size:15px}
+  button{margin-top:20px;background:#1ed760;color:#000;border:0;border-radius:24px;
+         padding:12px 26px;font-weight:bold;font-size:15px;cursor:pointer}
+  .aviso{background:#2a2118;border:1px solid #5a4a2a;border-radius:8px;padding:12px;margin:0 0 18px;
+         color:#e8c98a;font-size:14px}
+  .erro{background:#2a1818;border:1px solid #5a2a2a;color:#e88a8a}
+  table{width:100%;border-collapse:collapse;margin-top:16px;font-size:14px}
+  th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #2a2a2a}
+  th{color:#b3b3b3;font-weight:normal;font-size:12px;text-transform:uppercase}
+  code{background:#121212;padding:2px 6px;border-radius:4px;font-size:13px}
+  a{color:#1ed760}
+`;
+
+function paginaSimples(titulo, corpo) {
+  return `<html><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${titulo}</title><style>${ESTILO_PAGINA}</style></head>
+    <body><div class="caixa">${corpo}</div></body></html>`;
+}
+
+function formularioDeAcesso({ erro, valores, motivoInicial } = {}) {
+  const v = valores || {};
+  return paginaSimples(
+    "Pedir acesso — Asrustify",
+    `
+    <h1>Pedir acesso</h1>
+    <p>O app está em modo de desenvolvimento no Spotify, e por isso cada conta
+       precisa ser liberada uma a uma. Deixe seus dados aqui que eu libero — depois
+       é só autorizar normalmente.</p>
+    ${motivoInicial ? `<div class="aviso">${escapaHtml(motivoInicial)}</div>` : ""}
+    ${erro ? `<div class="aviso erro">${escapaHtml(erro)}</div>` : ""}
+    <form method="POST" action="acesso">
+      <label for="nome">Seu nome</label>
+      <input id="nome" name="nome" value="${escapaHtml(v.nome)}" required autocomplete="name">
+
+      <label for="email">E-mail da sua conta do Spotify</label>
+      <input id="email" name="email" type="email" value="${escapaHtml(v.email)}" required
+             autocomplete="email" placeholder="o mesmo com que você entra no Spotify">
+
+      <label for="usuario">Usuário do Spotify (opcional)</label>
+      <input id="usuario" name="usuario" value="${escapaHtml(v.usuario)}"
+             placeholder="cole o link do seu perfil, se souber">
+
+      <button type="submit">Enviar pedido</button>
+    </form>
+    <p style="margin-top:20px;font-size:13px">
+      Preciso do e-mail porque é o que o Spotify pede para liberar uma conta. Ele
+      não vai para lugar nenhum além disso.
+    </p>
+  `
+  );
+}
+
+app.get("/acesso", (req, res) => {
+  // Chegou pelo erro do Spotify, e não pelo link: dizer isso muda a leitura da
+  // página de "que formulário é esse?" para "ah, é por isso que não entrou".
+  const motivo = req.query.motivo
+    ? "O Spotify não deixou você autorizar porque sua conta ainda não está " +
+      "liberada no app. É isso que este formulário resolve."
+    : null;
+  res.send(formularioDeAcesso({ motivoInicial: motivo }));
+});
+
+/**
+ * Hash do IP, não o IP.
+ *
+ * O IP serve só para contar pedidos e segurar spam; guardá-lo em claro seria
+ * guardar dado pessoal que nunca vou precisar ler. O hash conta igual.
+ */
+function hashDoIp(req) {
+  const bruto =
+    (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+    req.socket?.remoteAddress ||
+    "";
+  if (!bruto) return null;
+  return crypto.createHash("sha256").update(bruto).digest("hex").slice(0, 32);
+}
+
+app.post("/acesso", async (req, res) => {
+  const valores = {
+    nome: req.body?.nome ?? "",
+    email: req.body?.email ?? "",
+    usuario: req.body?.usuario ?? "",
+  };
+
+  const pedido = validaPedido(req.body);
+  if (pedido.erro) {
+    return res.status(422).send(formularioDeAcesso({ erro: pedido.erro, valores }));
+  }
+
+  const ipHash = hashDoIp(req);
+
+  try {
+    await ensureDB(); // o GET desta rota pula o middleware do banco
+    if (ipHash) {
+      const [{ count }] = await sql`
+        SELECT COUNT(*)::int AS count FROM spotify_pedidos
+        WHERE ip_hash = ${ipHash}
+          AND criado_em > NOW() - (${JANELA_MINUTOS} || ' minutes')::interval
+      `;
+      if (!podePedir(count)) {
+        return res.status(429).send(
+          formularioDeAcesso({
+            erro:
+              `Você já mandou ${LIMITE_POR_IP} pedidos na última hora. ` +
+              "Espere um pouco — o primeiro já está na fila.",
+            valores,
+          })
+        );
+      }
+    }
+
+    await sql`
+      INSERT INTO spotify_pedidos (nome, email, usuario, ip_hash)
+      VALUES (${pedido.nome}, ${pedido.email}, ${pedido.usuario}, ${ipHash})
+      ON CONFLICT (email) DO UPDATE
+      SET nome = ${pedido.nome}, usuario = ${pedido.usuario}, criado_em = NOW(), atendido_em = NULL
+    `;
+  } catch (err) {
+    console.error("Falha ao gravar pedido:", err.message);
+    return res.status(500).send(
+      formularioDeAcesso({ erro: "Não consegui salvar agora. Tente de novo em instantes.", valores })
+    );
+  }
+
+  res.send(
+    paginaSimples(
+      "Pedido enviado — Asrustify",
+      `<h1>Pedido enviado ✅</h1>
+       <p>Assim que eu liberar sua conta, volte em
+          <a href="register">asrus.app/spotify/register</a> e autorize normalmente.</p>
+       <p style="font-size:13px">Guardei: <code>${escapaHtml(pedido.email)}</code></p>`
+    )
+  );
+});
+
+// ─── Página dos pedidos (sua) ─────────────────────────────────────────────────
+//
+// Basic Auth com fail-closed: sem usuário e senha configurados, ninguém entra.
+// Uma página que "libera quando não está configurada" exporia e-mail de todo
+// mundo que pediu acesso.
+
+const PEDIDOS_USER = process.env.PEDIDOS_USER || "";
+const PEDIDOS_PASS = process.env.PEDIDOS_PASS || "";
+
+function comparaSegura(a, b) {
+  const x = Buffer.from(String(a), "utf8");
+  const y = Buffer.from(String(b), "utf8");
+  if (x.length !== y.length) return false;
+  return crypto.timingSafeEqual(x, y);
+}
+
+function autorizadoNosPedidos(req) {
+  if (!PEDIDOS_USER || !PEDIDOS_PASS) return false;
+  const header = req.get("authorization") || "";
+  if (!header.startsWith("Basic ")) return false;
+  let decodificado = "";
+  try {
+    decodificado = Buffer.from(header.slice(6).trim(), "base64").toString("utf8");
+  } catch {
+    return false;
+  }
+  const i = decodificado.indexOf(":"); // só o 1º ":" separa
+  if (i < 0) return false;
+  // As duas comparações sempre rodam: parar na primeira diferença contaria o
+  // tempo e entregaria o usuário byte a byte.
+  const okUser = comparaSegura(decodificado.slice(0, i), PEDIDOS_USER);
+  const okPass = comparaSegura(decodificado.slice(i + 1), PEDIDOS_PASS);
+  return okUser && okPass;
+}
+
+function desafioDePedidos(res) {
+  return res
+    .status(401)
+    .set("WWW-Authenticate", 'Basic realm="asrus.app/spotify/pedidos", charset="UTF-8"')
+    .send("Acesso restrito.");
+}
+
+const quandoBR = new Intl.DateTimeFormat("pt-BR", {
+  timeZone: "America/Sao_Paulo",
+  day: "2-digit",
+  month: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+app.get("/pedidos", async (req, res) => {
+  if (!autorizadoNosPedidos(req)) return desafioDePedidos(res);
+  await ensureDB(); // esta rota pula o middleware do banco: ver autenticaAntesDoBanco
+
+  const linhas = await sql`
+    SELECT id, nome, email, usuario, criado_em, atendido_em
+    FROM spotify_pedidos
+    ORDER BY atendido_em NULLS FIRST, criado_em DESC
+    LIMIT 200
+  `;
+
+  const pendentes = linhas.filter((l) => !l.atendido_em);
+  const atendidos = linhas.filter((l) => l.atendido_em);
+
+  const linha = (l) => `
+    <tr>
+      <td>${quandoBR.format(new Date(l.criado_em))}</td>
+      <td>${escapaHtml(l.nome)}</td>
+      <td><code>${escapaHtml(l.email)}</code></td>
+      <td>${l.usuario ? escapaHtml(l.usuario) : "—"}</td>
+      <td>${
+        l.atendido_em
+          ? "adicionado"
+          : `<form method="POST" action="pedidos/atender" style="margin:0">
+               <input type="hidden" name="id" value="${l.id}">
+               <button type="submit" style="margin:0;padding:6px 14px;font-size:13px">marcar</button>
+             </form>`
+      }</td>
+    </tr>`;
+
+  res.send(
+    paginaSimples(
+      "Pedidos de acesso — Asrustify",
+      `<h1>Pedidos de acesso</h1>
+       <p>Adicione nome e e-mail em
+          <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer">
+          developer.spotify.com/dashboard</a> → seu app → <strong>User Management</strong>,
+          depois marque aqui.</p>
+       <div class="aviso">O Development Mode aceita no máximo <strong>25 contas</strong>.
+         Hoje: ${atendidos.length} marcadas como adicionadas.</div>
+       <h2 style="font-size:16px;margin:24px 0 0">Esperando (${pendentes.length})</h2>
+       ${
+         pendentes.length === 0
+           ? "<p>Nenhum.</p>"
+           : `<table><thead><tr><th>quando</th><th>nome</th><th>e-mail</th><th>usuário</th><th></th></tr></thead>
+              <tbody>${pendentes.map(linha).join("")}</tbody></table>`
+       }
+       <h2 style="font-size:16px;margin:28px 0 0">Já adicionados (${atendidos.length})</h2>
+       ${
+         atendidos.length === 0
+           ? "<p>Nenhum ainda.</p>"
+           : `<table><thead><tr><th>quando</th><th>nome</th><th>e-mail</th><th>usuário</th><th></th></tr></thead>
+              <tbody>${atendidos.map(linha).join("")}</tbody></table>`
+       }`
+    )
+  );
+});
+
+app.post("/pedidos/atender", async (req, res) => {
+  if (!autorizadoNosPedidos(req)) return desafioDePedidos(res);
+  await ensureDB(); // esta rota pula o middleware do banco: ver autenticaAntesDoBanco
+  const id = Number(req.body?.id);
+  if (Number.isInteger(id)) {
+    await sql`UPDATE spotify_pedidos SET atendido_em = NOW() WHERE id = ${id}`;
+  }
+  res.redirect("../pedidos");
 });
 
 app.get("/terms", (req, res) => {
