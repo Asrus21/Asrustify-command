@@ -319,7 +319,11 @@ const DB_FREE_ROUTES = new Set(["/register", "/terms", "/privacy", "/acesso"]);
  * Elas chamam ensureDB() por conta própria, depois de autorizar.
  */
 function autenticaAntesDoBanco(caminho) {
-  return caminho.startsWith("/api/fila/") || caminho.startsWith("/pedidos");
+  return (
+    caminho.startsWith("/api/fila/") ||
+    caminho.startsWith("/sr/") ||
+    caminho.startsWith("/pedidos")
+  );
 }
 
 app.use(async (req, res, next) => {
@@ -1077,13 +1081,24 @@ function renderLegalPage(docKey, lang) {
 
 const crypto = require("crypto");
 
-function segredoConfere(recebido) {
-  const esperado = process.env.FILA_SECRET || "";
+function comparaSegredo(recebido, esperado) {
   if (!esperado) return false; // fail-closed: sem segredo, ninguém entra
   const a = Buffer.from(String(recebido || ""), "utf8");
   const b = Buffer.from(esperado, "utf8");
   if (a.length !== b.length) return false;
   return crypto.timingSafeEqual(a, b);
+}
+
+function segredoConfere(recebido) {
+  return comparaSegredo(recebido, process.env.FILA_SECRET || "");
+}
+
+// O !sr tem segredo PRÓPRIO, e não o FILA_SECRET, porque ele viaja na URL do
+// comando do bot: fica salvo no painel do StreamElements, aparece em log de
+// proxy e escapa numa gravação de tela editando comandos. Separado, vazar um
+// não entrega o outro, e dá para trocar só este.
+function segredoDoSrConfere(recebido) {
+  return comparaSegredo(recebido, process.env.SR_SECRET || "");
 }
 
 // Sem `market`. O parâmetro `from_token` — que estava aqui — exige o escopo
@@ -1144,6 +1159,62 @@ async function enfileira(token, pedido) {
   };
 }
 
+/**
+ * Resolve a faixa e põe na fila, já com a recusa traduzida.
+ *
+ * Duas portas de entrada usam isto: o POST /api/fila (automação do resgate,
+ * segredo no header) e o GET /sr (comando de chat, segredo na URL). A decisão
+ * de o que dizer a quem pediu é a mesma nos dois — só muda o invólucro.
+ */
+async function enfileiraPedido(user, pedidoBruto) {
+  const pedido = interpretaPedido(pedidoBruto);
+  if (pedido.erro) {
+    return { ok: false, status: 422, motivo: "pedido_invalido", mensagem: pedido.erro };
+  }
+
+  try {
+    let r;
+    try {
+      r = await enfileira(user.access_token, pedido);
+    } catch (err) {
+      if (err.response?.status !== 401) throw err;
+      const novo = await refreshAccessToken(user.spotify_id, user.refresh_token);
+      r = await enfileira(novo, pedido);
+    }
+
+    if (!r.achou) {
+      return {
+        ok: false,
+        status: 404,
+        motivo: "nao_encontrada",
+        mensagem: "Não achei essa música no Spotify. Tente o nome com o artista, ou cole o link.",
+      };
+    }
+
+    return {
+      ok: true,
+      nome: r.nome,
+      artista: r.artista,
+      link: r.link,
+      texto: linhaDaFila(r.nome, r.artista),
+    };
+  } catch (err) {
+    const status = err.response?.status || 0;
+    const msgDoSpotify =
+      err.response?.data?.error?.message || err.response?.data?.error || err.message;
+    const { motivo, mensagem } = explicaErroDaFila(status, msgDoSpotify);
+    console.error("Falha ao enfileirar:", status, msgDoSpotify);
+    // O status HTTP é para quem chama programaticamente; a mensagem é a que vai
+    // ao chat.
+    return {
+      ok: false,
+      status: status >= 400 && status < 500 ? status : 502,
+      motivo,
+      mensagem,
+    };
+  }
+}
+
 app.post("/api/fila/:commandId", async (req, res) => {
   // A `mensagem` não é enfeite: quem chama esta rota repassa ela ao chat. Sem
   // ela, o erro chegava como um "não deu" genérico e o streamer não tinha por
@@ -1175,50 +1246,56 @@ app.post("/api/fila/:commandId", async (req, res) => {
     });
   }
 
-  const pedido = interpretaPedido(req.body?.pedido);
-  if (pedido.erro) {
-    return res.status(422).json({ ok: false, motivo: "pedido_invalido", mensagem: pedido.erro });
+  const r = await enfileiraPedido(user, req.body?.pedido);
+  if (!r.ok) {
+    const { status, ...corpo } = r;
+    return res.status(status).json(corpo);
+  }
+  const { ok, ...corpo } = r;
+  return res.json({ ok, ...corpo });
+});
+
+// ─── Comando !sr (StreamElements, Nightbot) ──────────────────────────────────
+//
+// Mesma fila do resgate por pontos, só que pedida pelo chat. É GET e responde
+// TEXTO PURO porque é isso que os bots sabem consumir: eles buscam a URL e
+// publicam o corpo.
+//
+// Sempre 200, mesmo recusando. Bot de chat engole corpo de resposta com status
+// de erro — o espectador veria silêncio em vez do motivo, que é justamente a
+// parte útil ("não achei essa música", "o Spotify não está tocando").
+//
+// Quem pode pedir, e de quanto em quanto tempo, é decisão do bot: o
+// StreamElements tem cooldown e restrição por cargo. Aqui não dá para saber
+// quem mandou — a requisição vem do servidor do bot, não do espectador.
+app.get("/sr/:commandId", async (req, res) => {
+  res.type("text/plain; charset=utf-8");
+  res.set("Cache-Control", "no-store");
+
+  if (!segredoDoSrConfere(req.query.k)) {
+    return res.send("Comando não configurado. O streamer precisa conferir o link do !sr.");
+  }
+
+  // Antes do banco, pela mesma razão que o segredo: um !sr digitado sozinho não
+  // deveria custar uma conexão.
+  const pedido = String(req.query.q ?? "").trim();
+  if (!pedido) {
+    return res.send("Diga o nome da música: !sr nome da música (ou cole o link do Spotify).");
   }
 
   try {
-    let r;
-    try {
-      r = await enfileira(user.access_token, pedido);
-    } catch (err) {
-      if (err.response?.status !== 401) throw err;
-      const novo = await refreshAccessToken(user.spotify_id, user.refresh_token);
-      r = await enfileira(novo, pedido);
-    }
-
-    if (!r.achou) {
-      return res.status(404).json({
-        ok: false,
-        motivo: "nao_encontrada",
-        mensagem: "Não achei essa música no Spotify. Tente o nome com o artista, ou cole o link.",
-      });
-    }
-
-    return res.json({
-      ok: true,
-      nome: r.nome,
-      artista: r.artista,
-      link: r.link,
-      texto: linhaDaFila(r.nome, r.artista),
-    });
-  } catch (err) {
-    const status = err.response?.status || 0;
-    const msgDoSpotify =
-      err.response?.data?.error?.message || err.response?.data?.error || err.message;
-    const { motivo, mensagem } = explicaErroDaFila(status, msgDoSpotify);
-    console.error("Falha ao enfileirar:", status, msgDoSpotify);
-    // O status HTTP daqui é para quem chama programaticamente; a mensagem é a
-    // que vai ao chat.
-    return res.status(status >= 400 && status < 500 ? status : 502).json({
-      ok: false,
-      motivo,
-      mensagem,
-    });
+    await ensureDB(); // esta rota pula o middleware do banco: ver autenticaAntesDoBanco
+  } catch {
+    return res.send("Banco indisponível. Tente daqui a pouco.");
   }
+
+  const user = await getUserByCommandId(req.params.commandId);
+  if (!user || !user.access_token) {
+    return res.send("Não achei essa conta do Spotify. O streamer precisa autorizar em asrus.app/spotify.");
+  }
+
+  const r = await enfileiraPedido(user, pedido);
+  return res.send(r.ok ? r.texto : r.mensagem);
 });
 
 // ─── Pedido de acesso (Development Mode do Spotify) ───────────────────────────
