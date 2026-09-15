@@ -1,6 +1,8 @@
 // Exercita a validação do pedido de acesso e o escape que protege a página de
 // pedidos. Sem Express, sem banco e sem rede.
 const {
+  limiteDeContas,
+  camposDoDashboard,
   NOME_MAX,
   EMAIL_MAX,
   LIMITE_POR_IP,
@@ -81,6 +83,31 @@ for (let n = 0; n < LIMITE_POR_IP; n++) eq(`${n} pedidos ainda cabe`, podePedir(
 eq('no limite, para', podePedir(LIMITE_POR_IP), false);
 eq('acima do limite, para', podePedir(LIMITE_POR_IP + 5), false);
 eq('contagem ausente é tratada como zero', podePedir(undefined), true);
+
+// ─── Teto de contas ────────────────────────────────────────────────────────
+// Em variável de ambiente porque o Spotify já mudou esse número (25 -> 5) e vai
+// poder mudar de novo: assim a próxima mudança é uma linha na Vercel, não deploy.
+eq('padrão é 5', limiteDeContas(undefined), 5);
+eq('lê o valor configurado', limiteDeContas('12'), 12);
+eq('aceita número, não só texto', limiteDeContas(3), 3);
+for (const ruim of ['', '   ', 'abc', '0', '-4', '2.5abc', null]) {
+  eq(`"${ruim}" cai no padrão`, limiteDeContas(ruim), ruim === '2.5abc' ? 2 : 5);
+}
+
+// ─── Os dois campos do User Management ─────────────────────────────────────
+// Full Name recebe o USUÁRIO do Spotify quando existe: é ele que identifica a
+// conta sem ambiguidade, e foi assim que as já liberadas foram cadastradas.
+eq('usuário do Spotify vira o Full Name',
+  camposDoDashboard({ nome: 'Ana Silva', email: 'ana@x.com', usuario: 'abc123' }),
+  { fullName: 'abc123', email: 'ana@x.com' });
+eq('sem usuário, cai no nome digitado',
+  camposDoDashboard({ nome: 'Ana Silva', email: 'ana@x.com', usuario: null }),
+  { fullName: 'Ana Silva', email: 'ana@x.com' });
+eq('usuário vazio conta como ausente',
+  camposDoDashboard({ nome: 'Ana', email: 'a@x.com', usuario: '' }).fullName, 'Ana');
+eq('sem nada, devolve vazio e não "undefined"',
+  camposDoDashboard({}), { fullName: '', email: '' });
+eq('pedido ausente não explode', camposDoDashboard(undefined), { fullName: '', email: '' });
 
 console.log(`\n${ok} asserções passaram, ${falhas} falharam`);
 process.exit(falhas ? 1 : 0);

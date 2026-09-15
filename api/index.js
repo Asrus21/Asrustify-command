@@ -19,6 +19,8 @@ const {
   escapaHtml,
   validaPedido,
   podePedir,
+  limiteDeContas,
+  camposDoDashboard,
   JANELA_MINUTOS,
   LIMITE_POR_IP,
 } = require("./acesso");
@@ -1213,6 +1215,15 @@ const ESTILO_PAGINA = `
   th{color:#b3b3b3;font-weight:normal;font-size:12px;text-transform:uppercase}
   code{background:#121212;padding:2px 6px;border-radius:4px;font-size:13px}
   a{color:#1ed760}
+  .cartao{background:#181818;border:1px solid #2a2a2a;border-radius:10px;padding:16px;margin:12px 0}
+  .cartao-topo{display:flex;justify-content:space-between;align-items:center;gap:12px;
+               flex-wrap:wrap;margin-bottom:6px;font-size:13px;color:#b3b3b3}
+  .cartao label{margin:10px 0 4px;font-size:12px;color:#b3b3b3;font-weight:bold}
+  .linha-copia{display:flex;gap:8px}
+  .linha-copia input{flex:1;min-width:0}
+  .copiar{margin:0;padding:10px 16px;font-size:13px;background:#333;color:#fff;white-space:nowrap}
+  .marcar{margin:0;padding:8px 16px;font-size:13px}
+  .nota{font-size:12px;margin:10px 0 0;color:#8a8a8a}
 `;
 
 function paginaSimples(titulo, corpo) {
@@ -1401,48 +1412,102 @@ app.get("/pedidos", async (req, res) => {
 
   const pendentes = linhas.filter((l) => !l.atendido_em);
   const atendidos = linhas.filter((l) => l.atendido_em);
+  const teto = limiteDeContas(process.env.LIMITE_CONTAS);
+  const lotado = atendidos.length >= teto;
 
-  const linha = (l) => `
+  // Cada pendente vira um bloco com os MESMOS dois campos do User Management, na
+  // mesma ordem e com os mesmos rótulos. Ler a tela e digitar no dashboard é
+  // onde o erro entra — nome de uma pessoa com e-mail de outra não dá erro
+  // nenhum na hora, só uma conta liberada errada e outra esperando para sempre.
+  const cartao = (l) => {
+    const { fullName, email } = camposDoDashboard(l);
+    const campo = (rotulo, valor) => `
+      <label>${rotulo}</label>
+      <div class="linha-copia">
+        <input readonly value="${escapaHtml(valor)}">
+        <button type="button" class="copiar" data-valor="${escapaHtml(valor)}">copiar</button>
+      </div>`;
+    return `
+      <div class="cartao">
+        <div class="cartao-topo">
+          <span>${escapaHtml(l.nome)} · ${quandoBR.format(new Date(l.criado_em))}</span>
+          <form method="POST" action="pedidos/atender" style="margin:0">
+            <input type="hidden" name="id" value="${l.id}">
+            <button type="submit" class="marcar">marcar como adicionado</button>
+          </form>
+        </div>
+        ${campo("Full Name", fullName)}
+        ${campo("Email", email)}
+        ${
+          l.usuario
+            ? ""
+            : `<p class="nota">Não informou o usuário do Spotify — o Full Name acima é o
+                 nome digitado. Se o dashboard recusar, peça o link do perfil a ela.</p>`
+        }
+      </div>`;
+  };
+
+  const linhaAtendida = (l) => `
     <tr>
       <td>${quandoBR.format(new Date(l.criado_em))}</td>
       <td>${escapaHtml(l.nome)}</td>
       <td><code>${escapaHtml(l.email)}</code></td>
-      <td>${l.usuario ? escapaHtml(l.usuario) : "—"}</td>
-      <td>${
-        l.atendido_em
-          ? "adicionado"
-          : `<form method="POST" action="pedidos/atender" style="margin:0">
-               <input type="hidden" name="id" value="${l.id}">
-               <button type="submit" style="margin:0;padding:6px 14px;font-size:13px">marcar</button>
-             </form>`
-      }</td>
     </tr>`;
 
   res.send(
     paginaSimples(
       "Pedidos de acesso — Asrustify",
       `<h1>Pedidos de acesso</h1>
-       <p>Adicione nome e e-mail em
+       <p>Cole os dois campos em
           <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer">
           developer.spotify.com/dashboard</a> → seu app → <strong>User Management</strong>,
           depois marque aqui.</p>
-       <div class="aviso">O Development Mode tem teto de contas, e ele mudou em
-         fevereiro de 2026 — o número que vale é o que o seu dashboard mostra.
-         Aqui: <strong>${atendidos.length}</strong> marcadas como adicionadas.</div>
-       <h2 style="font-size:16px;margin:24px 0 0">Esperando (${pendentes.length})</h2>
-       ${
-         pendentes.length === 0
-           ? "<p>Nenhum.</p>"
-           : `<table><thead><tr><th>quando</th><th>nome</th><th>e-mail</th><th>usuário</th><th></th></tr></thead>
-              <tbody>${pendentes.map(linha).join("")}</tbody></table>`
-       }
+
+       <div class="aviso${lotado ? " erro" : ""}">
+         <strong>${atendidos.length}/${teto}</strong> adicionadas.
+         ${
+           lotado
+             ? "Sem vaga: para liberar alguém novo é preciso remover uma conta no dashboard."
+             : `Sobram ${teto - atendidos.length}.`
+         }
+         O número que vale é o do seu dashboard — se ele mudar, ajuste
+         <code>LIMITE_CONTAS</code>.
+       </div>
+
+       <h2 style="font-size:16px;margin:24px 0 8px">Esperando (${pendentes.length})</h2>
+       ${pendentes.length === 0 ? "<p>Nenhum.</p>" : pendentes.map(cartao).join("")}
+
        <h2 style="font-size:16px;margin:28px 0 0">Já adicionados (${atendidos.length})</h2>
        ${
          atendidos.length === 0
            ? "<p>Nenhum ainda.</p>"
-           : `<table><thead><tr><th>quando</th><th>nome</th><th>e-mail</th><th>usuário</th><th></th></tr></thead>
-              <tbody>${atendidos.map(linha).join("")}</tbody></table>`
-       }`
+           : `<table><thead><tr><th>quando</th><th>nome</th><th>e-mail</th></tr></thead>
+              <tbody>${atendidos.map(linhaAtendida).join("")}</tbody></table>`
+       }
+
+       <script>
+         // Copiar sem depender do clipboard moderno: em http, ou com a permissão
+         // negada, navigator.clipboard simplesmente não existe — e um botão que
+         // não faz nada e não avisa é pior do que não ter botão.
+         document.querySelectorAll(".copiar").forEach(function (b) {
+           b.addEventListener("click", function () {
+             var texto = b.getAttribute("data-valor");
+             var avisar = function (ok) {
+               b.textContent = ok ? "copiado" : "selecione e copie";
+               setTimeout(function () { b.textContent = "copiar"; }, 1500);
+             };
+             if (navigator.clipboard && navigator.clipboard.writeText) {
+               navigator.clipboard.writeText(texto).then(function () { avisar(true); },
+                 function () { avisar(false); });
+               return;
+             }
+             var campo = b.previousElementSibling;
+             campo.focus();
+             campo.select();
+             avisar(false);
+           });
+         });
+       </script>`
     )
   );
 });

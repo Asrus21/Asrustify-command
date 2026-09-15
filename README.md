@@ -35,6 +35,7 @@ Navegador -> https://asrus.app/spotify/<rota>
 | `DATABASE_URL` | Injetada automaticamente ao conectar o Neon pela aba **Storage** |
 | `FILA_SECRET` | Segredo compartilhado com quem chama `POST /api/fila/:commandId`. Sem ele, a rota nega tudo — ela **modifica** o player. |
 | `PEDIDOS_USER` / `PEDIDOS_PASS` | Basic Auth da página `/pedidos`. Sem os dois, ela nega tudo — mostra e-mail de quem pediu acesso. |
+| `LIMITE_CONTAS` | Quantas contas o Development Mode aceita (padrão 5). Só alimenta o contador do painel — quem manda é o dashboard. |
 
 ## Deploy
 
@@ -102,7 +103,7 @@ vir digitado pela própria pessoa.
 |---|---|
 | `GET /acesso` | formulário público: nome, e-mail, usuário do Spotify (opcional) |
 | `POST /acesso` | grava o pedido (validação + teto por IP + um pedido por e-mail) |
-| `GET /pedidos` | **sua** página, Basic Auth: lista os pendentes e os já adicionados |
+| `GET /pedidos` | **sua** página, Basic Auth: cada pendente vira um bloco com os dois campos do *User Management* (`Full Name` e `Email`), prontos para copiar |
 | `POST /pedidos/atender` | marca um pedido como adicionado |
 
 Quem é barrado chega ao formulário por dois caminhos, porque nem sempre o
@@ -112,6 +113,10 @@ parar na tela dele.
 
 O IP é guardado como **hash**, não em claro: ele serve só para contar pedidos e
 segurar spam, e o hash conta igual.
+
+No bloco de cada pedido, o **`Full Name` recebe o usuário do Spotify** quando a
+pessoa informou, e não o nome digitado: é ele que identifica a conta sem
+ambiguidade. Sem usuário, cai no nome — e o bloco avisa que pode não bastar.
 
 **O teto de contas do Development Mode continua valendo.** Isto automatiza o
 processo de juntar os dados, não o limite.
