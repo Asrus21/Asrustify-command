@@ -34,6 +34,7 @@ Navegador -> https://asrus.app/spotify/<rota>
 | `BASE_URL` | `https://asrus.app/spotify` (sem barra final) |
 | `DATABASE_URL` | Injetada automaticamente ao conectar o Neon pela aba **Storage** |
 | `FILA_SECRET` | Segredo compartilhado com quem chama `POST /api/fila/:commandId`. Sem ele, a rota nega tudo — ela **modifica** o player. |
+| `PEDIDOS_USER` / `PEDIDOS_PASS` | Basic Auth da página `/pedidos`. Sem os dois, ela nega tudo — mostra e-mail de quem pediu acesso. |
 
 ## Deploy
 
@@ -88,14 +89,41 @@ rota nega tudo.
 O escopo é novo: quem autorizou antes desta versão precisa **reautorizar uma
 vez** para o pedido de música funcionar.
 
+## Pedido de acesso (Development Mode)
+
+Em Development Mode o Spotify **barra quem não está no User Management antes de
+emitir qualquer token**. Sem token não há `/v1/me`, então não há e-mail nem ID
+para capturar automaticamente: é circular por desenho deles. O e-mail só pode
+vir digitado pela própria pessoa.
+
+| Rota | O que é |
+|---|---|
+| `GET /acesso` | formulário público: nome, e-mail, usuário do Spotify (opcional) |
+| `POST /acesso` | grava o pedido (validação + teto por IP + um pedido por e-mail) |
+| `GET /pedidos` | **sua** página, Basic Auth: lista os pendentes e os já adicionados |
+| `POST /pedidos/atender` | marca um pedido como adicionado |
+
+Quem é barrado chega ao formulário por dois caminhos, porque nem sempre o
+Spotify redireciona de volta: o `/callback` manda para lá quando recebe o erro,
+e a página `/register` mostra o link desde o começo para o caso de o Spotify
+parar na tela dele.
+
+O IP é guardado como **hash**, não em claro: ele serve só para contar pedidos e
+segurar spam, e o hash conta igual.
+
+**O teto de 25 contas do Development Mode continua valendo.** Isto automatiza o
+processo de juntar os dados, não o limite — passar disso exige *quota extension*
+junto ao Spotify.
+
 ## Testes
 
 ```bash
 npm test
 ```
 
-Exercita a lógica pura de `api/fila.js` — interpretação do pedido e tradução dos
-erros do Spotify — sem Express, sem banco e sem rede.
+Exercita a lógica pura de `api/fila.js` (interpretação do pedido e tradução dos
+erros do Spotify) e de `api/acesso.js` (validação do formulário e o escape que
+protege a página de pedidos) — sem Express, sem banco e sem rede.
 
 ## Rodar localmente
 
