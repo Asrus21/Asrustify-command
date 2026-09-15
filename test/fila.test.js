@@ -75,6 +75,23 @@ eq('mensagem de dispositivo mesmo com outro status',
   explicaErroDaFila(502, 'Player command failed: No active device found').motivo, 'sem_dispositivo');
 eq('403 = sem premium', explicaErroDaFila(403, 'Player command failed: Premium required').motivo, 'sem_premium');
 eq('premium mesmo sem 403', explicaErroDaFila(500, 'PREMIUM_REQUIRED').motivo, 'sem_premium');
+
+// O 403 é ambíguo no Spotify. Tratá-lo como "falta Premium" mandava o streamer
+// conferir a assinatura enquanto o defeito era outro — foi o que aconteceu com
+// o market=from_token, que devolvia "Insufficient client scope" antes mesmo de
+// tentar enfileirar.
+eq('403 de escopo não é premium',
+  explicaErroDaFila(403, 'Insufficient client scope').motivo, 'sem_escopo');
+eq('403 de escopo manda reautorizar',
+  explicaErroDaFila(403, 'Insufficient client scope').mensagem.includes('reautorizar'), true);
+eq('403 de restrição é restrição',
+  explicaErroDaFila(403, 'Player command failed: Restriction violated').motivo, 'restricao');
+eq('403 sem texto conhecido não inventa premium',
+  explicaErroDaFila(403, 'Something else entirely').motivo, 'erro');
+eq('403 desconhecido repassa o texto do Spotify',
+  explicaErroDaFila(403, 'Something else entirely').mensagem.includes('Something else entirely'), true);
+eq('403 sem mensagem nenhuma diz ao menos o status',
+  explicaErroDaFila(403, '').mensagem.includes('403'), true);
 eq('401 = autorização', explicaErroDaFila(401, 'The access token expired').motivo, 'autorizacao');
 eq('429 = limite', explicaErroDaFila(429, '').motivo, 'limite');
 eq('desconhecido cai no genérico', explicaErroDaFila(500, 'boom').motivo, 'erro');

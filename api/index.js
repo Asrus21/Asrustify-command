@@ -1085,17 +1085,22 @@ function segredoConfere(recebido) {
   return crypto.timingSafeEqual(a, b);
 }
 
+// Sem `market`. O parâmetro `from_token` — que estava aqui — exige o escopo
+// user-read-private, que este app não pede: o Spotify respondia 403
+// "Insufficient client scope" ANTES de qualquer tentativa de enfileirar, e o
+// pedido morria na hora de resolver a faixa, por nome ou por link. Omitir o
+// market não perde nada: com token de usuário, a API já aplica o país da conta.
 async function buscaFaixa(token, termo) {
   const res = await axios.get("https://api.spotify.com/v1/search", {
-    params: { q: termo, type: "track", limit: 1, market: "from_token" },
+    params: { q: termo, type: "track", limit: 1 },
     headers: { Authorization: `Bearer ${token}` },
   });
   return res.data?.tracks?.items?.[0] || null;
 }
 
+// Mesmo motivo do buscaFaixa acima: nada de market=from_token.
 async function leFaixa(token, id) {
   const res = await axios.get(`https://api.spotify.com/v1/tracks/${id}`, {
-    params: { market: "from_token" },
     headers: { Authorization: `Bearer ${token}` },
   });
   return res.data || null;
@@ -1128,8 +1133,17 @@ async function enfileira(token, pedido) {
 }
 
 app.post("/api/fila/:commandId", async (req, res) => {
+  // A `mensagem` não é enfeite: quem chama esta rota repassa ela ao chat. Sem
+  // ela, o erro chegava como um "não deu" genérico e o streamer não tinha por
+  // onde começar — inclusive quando o defeito era esta configuração aqui.
   if (!segredoConfere(req.get("X-Fila-Secret"))) {
-    return res.status(403).json({ ok: false, motivo: "sem_autorizacao" });
+    return res.status(403).json({
+      ok: false,
+      motivo: "sem_autorizacao",
+      mensagem:
+        "A automação não está autorizada a falar com o Asrustify. O streamer " +
+        "precisa conferir o segredo compartilhado da fila.",
+    });
   }
 
   try {
@@ -1140,7 +1154,13 @@ app.post("/api/fila/:commandId", async (req, res) => {
 
   const user = await getUserByCommandId(req.params.commandId);
   if (!user || !user.access_token) {
-    return res.status(404).json({ ok: false, motivo: "conta_nao_encontrada" });
+    return res.status(404).json({
+      ok: false,
+      motivo: "conta_nao_encontrada",
+      mensagem:
+        "Não achei essa conta do Spotify. O streamer precisa autorizar em " +
+        "asrus.app/spotify e usar o id do comando que aparece lá.",
+    });
   }
 
   const pedido = interpretaPedido(req.body?.pedido);
