@@ -2,6 +2,7 @@
 // — sem Express, sem banco e sem Spotify.
 const {
   SPOTIFY_SCOPES,
+  consultasDeBusca,
   PEDIDO_MAX,
   interpretaPedido,
   explicaErroDaFila,
@@ -65,6 +66,25 @@ for (const vazio of [null, undefined, '', '   ']) {
 }
 eq('no limite passa', interpretaPedido('a'.repeat(PEDIDO_MAX)).tipo, 'busca');
 eq('acima do limite é recusado', Boolean(interpretaPedido('a'.repeat(PEDIDO_MAX + 1)).erro), true);
+
+// ─── Consultas de busca ────────────────────────────────────────────────────
+// "zero by lmyk" mandado cru ao Spotify traz outra música: o "by" concorre com
+// o resto e o limit=1 não dá segunda chance. Os filtros de campo resolvem, e a
+// consulta crua fica de reserva.
+eq('"X by Y" vira track + artist',
+  consultasDeBusca('zero by lmyk')[0], 'track:"zero" artist:"lmyk"');
+eq('"X by Y" mantém a busca crua como reserva',
+  consultasDeBusca('zero by lmyk')[1], 'zero by lmyk');
+eq('"X por Y" também', consultasDeBusca('Tempo Perdido por Legião Urbana')[0],
+  'track:"Tempo Perdido" artist:"Legião Urbana"');
+eq('hífen tenta as duas ordens', consultasDeBusca('Queen - Bohemian Rhapsody').slice(0, 2),
+  ['track:"Bohemian Rhapsody" artist:"Queen"', 'track:"Queen" artist:"Bohemian Rhapsody"']);
+eq('hífen também guarda a crua', consultasDeBusca('Queen - Bohemian Rhapsody')[2],
+  'Queen - Bohemian Rhapsody');
+eq('sem separador, só a busca crua', consultasDeBusca('bohemian rhapsody'), ['bohemian rhapsody']);
+eq('aspas do pedido não escapam para a consulta',
+  consultasDeBusca('a "melhor" by alguem')[0], 'track:"a melhor" artist:"alguem"');
+eq('vazio não vira consulta', consultasDeBusca('   '), []);
 
 // ─── Tradução dos erros do Spotify ─────────────────────────────────────────
 // 403 e 404 do Spotify aqui não são "proibido" nem "não encontrado": são conta

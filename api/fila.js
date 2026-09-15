@@ -61,6 +61,38 @@ function interpretaPedido(bruto) {
 }
 
 /**
+ * Quebra "zero by lmyk" em consultas que o Spotify entende.
+ *
+ * A busca dele não lê "X by Y" como título e artista: manda tudo como texto
+ * solto, e o "by" concorre com o resto. Com `limit: 1` o primeiro resultado
+ * dessa bagunça é o que entra na fila — foi assim que um pedido de "zero by
+ * lmyk" trouxe outra música.
+ *
+ * Os filtros de campo (`track:` e `artist:`) resolvem quando a pessoa escreveu
+ * quem canta. A consulta crua fica por último: se o palpite estruturado não
+ * achar nada, a busca normal ainda tem a sua chance, e nada piora.
+ *
+ * Nos separadores sem ordem definida (o hífen), as duas leituras são tentadas —
+ * "Queen - Bohemian Rhapsody" e "Bohemian Rhapsody - Queen" são igualmente
+ * comuns no chat.
+ */
+function consultasDeBusca(termo) {
+  const limpo = String(termo ?? '').trim();
+  if (!limpo) return [];
+
+  const aspas = (t) => t.trim().replace(/"/g, '');
+  const campos = (faixa, artista) => `track:"${aspas(faixa)}" artist:"${aspas(artista)}"`;
+
+  const porExtenso = limpo.match(/^(.+?)\s+(?:by|por|de|da|do)\s+(.+)$/i);
+  if (porExtenso) return [campos(porExtenso[1], porExtenso[2]), limpo];
+
+  const hifen = limpo.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+  if (hifen) return [campos(hifen[2], hifen[1]), campos(hifen[1], hifen[2]), limpo];
+
+  return [limpo];
+}
+
+/**
  * Traduz a recusa do Spotify em algo que resolve o problema de quem está lendo
  * o chat.
  *
@@ -136,6 +168,7 @@ function linhaDaFila(nome, artista) {
 
 module.exports = {
   SPOTIFY_SCOPES,
+  consultasDeBusca,
   PEDIDO_MAX,
   interpretaPedido,
   explicaErroDaFila,
