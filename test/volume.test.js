@@ -23,6 +23,17 @@ ok('decimal é arredondado (o Spotify só aceita inteiro)', () => {
   assert.equal(interpretaVolume('49,4', 30).alvo, 49);
 });
 ok('0 é mudo, não "nada escrito"', () => assert.deepEqual(interpretaVolume('0', 30), { alvo: 0, relativo: false }));
+ok('e por isso 0 NUNCA pode virar sentinela de "sem argumento"', () => {
+  // No !clip o "0" serve de sentinela porque 0 segundos nunca foi duração
+  // válida. Aqui 0 é um volume de verdade: o mudo. Se alguém puser
+  // &v=$(1|0) no comando do bot, todo "!vol" sem argumento muta o Spotify.
+  // O par abaixo é a diferença, e é ela que segura essa tentação:
+  assert.equal(interpretaVolume('0', 30).alvo, 0, '0 sem aspas tem que mutar');
+  assert.equal(interpretaVolume("'0'", 30).erro, 'vazio', "'0' com aspas não é número");
+  assert.equal(interpretaVolume('"0"', 30).erro, 'vazio', '"0" com aspas não é número');
+  // Um padrão seguro é qualquer palavra: nenhuma delas é volume.
+  assert.equal(interpretaVolume('atual', 30).erro, 'vazio');
+});
 ok('100 vale', () => assert.equal(interpretaVolume('100', 30).alvo, 100));
 
 console.log('absoluto fora da faixa é RECUSADO');
