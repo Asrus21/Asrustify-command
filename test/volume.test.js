@@ -16,7 +16,8 @@ const ok = (nome, f) => { f(); n++; console.log('  ok', nome); };
 
 console.log('volume absoluto');
 ok('número simples', () => assert.deepEqual(interpretaVolume('50', 30), { alvo: 50, relativo: false }));
-ok('com espaço e %', () => assert.deepEqual(interpretaVolume('  70% ', 30), { alvo: 70, relativo: false }));
+ok('com espaço e % na ENTRADA (só a saída perdeu o %)', () =>
+  assert.deepEqual(interpretaVolume('  70% ', 30), { alvo: 70, relativo: false }));
 ok('decimal é arredondado (o Spotify só aceita inteiro)', () => {
   assert.equal(interpretaVolume('49.6', 30).alvo, 50);
   assert.equal(interpretaVolume('49,4', 30).alvo, 49);
@@ -86,22 +87,24 @@ ok('mas NÚMERO fora da faixa continua sendo recusado', () => {
 });
 
 console.log('a linha do chat');
-ok('absoluto não mostra de onde veio', () => assert.equal(linhaDoVolume(50), 'Volume: 50%'));
-ok('relativo mostra o de → para', () => assert.equal(linhaDoVolume(40, 30), 'Volume: 30% → 40%'));
+ok('absoluto não mostra de onde veio', () => assert.equal(linhaDoVolume(50), 'Volume: 50'));
+ok('relativo mostra o de → para', () => assert.equal(linhaDoVolume(40, 30), 'Volume: 30 -> 40'));
 ok('zero é mudo', () => {
-  assert.equal(linhaDoVolume(0), 'Volume no mudo (0%).');
-  assert.equal(linhaDoVolume(0, 30), 'Volume no mudo (0%).');
+  assert.equal(linhaDoVolume(0), 'Volume no mudo.');
+  assert.equal(linhaDoVolume(0, 30), 'Volume no mudo.');
 });
 ok('só informar', () => {
-  assert.equal(linhaDoVolumeAtual(55), 'Volume atual: 55%. Use !volume 50 para mudar.');
+  assert.equal(linhaDoVolumeAtual(55), 'Volume atual: 55. Use !volume 50 para mudar.');
   assert.match(linhaDoVolumeAtual(0), /mudo/);
   assert.match(linhaDoVolumeAtual(null), /Abra o Spotify/);
 });
 
-ok('nenhuma linha do chat tem caractere fora do BMP', () => {
-  // Emoji é par substituto em UTF-16, e foi o que sumiu no caminho até o chat:
-  // a rota devolvia o texto inteiro e o chat não mostrava nada.
-  const foraDoBMP = /[\u{10000}-\u{10FFFF}]/u;
+ok('nenhuma linha do chat tem "%" nem caractere fora do BMP', () => {
+  // As duas mensagens que sumiram no chat — com a rota devolvendo 200,
+  // text/plain e o texto inteiro — eram as únicas com "%". Tirar só o emoji
+  // não resolveu, testado no chat de verdade. Acento pode: as que apareceram
+  // têm. O "%" na ENTRADA continua aceito ("!volume 50%"); é só na saída.
+  const proibido = /[%\u{10000}-\u{10FFFF}]/u;
   const linhas = [
     linhaDoVolume(50), linhaDoVolume(40, 30), linhaDoVolume(0), linhaDoVolume(0, 30),
     linhaDoVolumeAtual(55), linhaDoVolumeAtual(0), linhaDoVolumeAtual(null),
@@ -111,7 +114,7 @@ ok('nenhuma linha do chat tem caractere fora do BMP', () => {
     interpretaVolume('+1', null).mensagem,
   ];
   for (const l of linhas) {
-    assert.ok(!foraDoBMP.test(String(l)), `tem emoji: ${JSON.stringify(l)}`);
+    assert.ok(!proibido.test(String(l)), `não pode ir ao chat: ${JSON.stringify(l)}`);
   }
 });
 
