@@ -70,7 +70,11 @@ ok('texto não numérico ensina o uso', () => {
 });
 ok('placeholder do bot não substituído = "nada escrito", não lixo', () => {
   // "!vol" sozinho chega como "$(1)": a pessoa quer saber o volume atual.
-  for (const v of ['$(1)', '${1:}', '$(querystring)', '%1%', '{{1}}', '$1']) {
+  for (const v of [
+    '$(1)', '${1:}', '$(querystring)', '%1%', '{{1}}', '$1',
+    // sem o cifrão: foi ISTO que o StreamElements mandou em produção
+    '(1)', '(1:)', '{1}', '[1]', '(querystring)',
+  ]) {
     assert.equal(interpretaVolume(v, 30).erro, 'vazio', `${v} deveria virar vazio`);
   }
 });
