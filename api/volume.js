@@ -31,34 +31,30 @@ function interpretaVolume(bruto, atual) {
   const cru = String(bruto ?? '').trim();
   if (!cru) return { erro: 'vazio' };
 
-  // Bot de chat não manda campo vazio quando o comando roda sem argumento:
-  // manda o texto do próprio placeholder. Um "!vol" sozinho chega aqui assim,
-  // e tratar isso como lixo faria o comando ensinar a sintaxe quando a pessoa
-  // só queria saber o volume atual. É o mesmo caso: ninguém escreveu nada.
-  //
-  // A checagem é por CARACTERE, não pelas formas conhecidas. A primeira versão
-  // listava `$(`, `${`, `%1%`, `{{` — e em produção o StreamElements mandou
-  // "(1)", sem o cifrão, que não casava com nenhuma delas. Aqui dá para ser
-  // grosseiro sem perder nada: volume é número, e número não tem parêntese,
-  // chave, colchete nem cifrão. O "%" do fim sai antes porque "50%" é uma
-  // forma legítima de escrever.
-  if (/[$(){}\[\]%]/.test(cru.replace(/%$/, ''))) return { erro: 'vazio' };
-
-  // "50%" e "49,6" são formas normais de escrever. Um "%" sozinho sobra vazio,
-  // e vazio já quer dizer "só me diga o volume atual".
+  // "50%" e "49,6" são formas normais de escrever.
   const limpo = cru.replace(',', '.').replace(/%$/, '');
   if (!limpo) return { erro: 'vazio' };
 
   const relativo = /^[+-]/.test(limpo);
   const n = Number(limpo);
-  if (!Number.isFinite(n)) {
-    return {
-      erro: 'invalido',
-      mensagem:
-        'Diga o volume em número: !volume 50 (ou !volume +10 / !volume -10 ' +
-        'para mexer a partir do atual).',
-    };
-  }
+
+  // O que NÃO É NÚMERO vira "me diga o volume atual", e não uma recusa.
+  //
+  // Isto começou como tentativa de reconhecer o placeholder do bot para
+  // distinguir "não escreveram nada" de "escreveram errado". Custou três
+  // rodadas em produção: primeiro veio "$(1)", depois "(1)" sem o cifrão, e
+  // depois uma terceira forma que eu não consegui identificar. É o parser do
+  // StreamElements que decide, não nós, e não dá para enumerar o que ele faz.
+  //
+  // Então a regra deixa de depender disso. Num texto que não é número não há o
+  // que fazer de qualquer jeito, e a resposta do volume atual já carrega a
+  // sintaxe — "Volume atual: 32%. Use !volume 50 para mudar." — então nem a
+  // pessoa que digitou errado fica sem a correção. Nenhuma forma nova de
+  // placeholder volta a quebrar isto.
+  //
+  // Número fora da faixa continua sendo RECUSADO (ver abaixo): ali a pessoa
+  // disse um número, e o que ela precisa ouvir é que ele não serve.
+  if (!Number.isFinite(n)) return { erro: 'vazio' };
 
   // O Spotify só aceita inteiro.
   const passo = Math.round(n);
