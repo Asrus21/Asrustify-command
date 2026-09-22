@@ -68,8 +68,11 @@ ok('texto não numérico ensina o uso', () => {
     assert.match(r.mensagem, /!volume 50/);
   }
 });
-ok('placeholder do bot não substituído não vira volume', () => {
-  for (const v of ['$(1)', '${1:}', '$(querystring)']) assert.equal(interpretaVolume(v, 30).erro, 'invalido');
+ok('placeholder do bot não substituído = "nada escrito", não lixo', () => {
+  // "!vol" sozinho chega como "$(1)": a pessoa quer saber o volume atual.
+  for (const v of ['$(1)', '${1:}', '$(querystring)', '%1%', '{{1}}', '$1']) {
+    assert.equal(interpretaVolume(v, 30).erro, 'vazio', `${v} deveria virar vazio`);
+  }
 });
 
 console.log('a linha do chat');
@@ -98,6 +101,11 @@ ok('403 é decidido pela MENSAGEM, nunca pelo status', () => {
 });
 ok('dispositivo sem controle de volume tem frase própria', () =>
   assert.match(explicaErroDoVolume(403, 'VOLUME_CONTROL_DISALLOW').mensagem, /TV, alto-falante|navegador/));
+ok('a frase que o Spotify manda DE VERDADE (vista em produção)', () => {
+  const r = explicaErroDoVolume(403, 'Player command failed: Cannot control device volume');
+  assert.equal(r.motivo, 'sem_controle_de_volume');
+  assert.match(r.mensagem, /app do celular ou do computador/);
+});
 ok('401 e 429', () => {
   assert.equal(explicaErroDoVolume(401, 'The access token expired').motivo, 'autorizacao');
   assert.equal(explicaErroDoVolume(429, '').motivo, 'limite');
