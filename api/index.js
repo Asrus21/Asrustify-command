@@ -32,6 +32,7 @@ const {
   linhaDaFila,
 } = require("./fila");
 const {
+  ehSilencio,
   interpretaVolume,
   explicaErroDoVolume,
   linhaDoVolume,
@@ -1350,11 +1351,15 @@ async function comTokenValido(user, fn) {
 }
 
 async function ajustaVolume(user, pedidoBruto) {
+  // A rota já barra isto antes do banco; aqui é a mesma regra, para quem
+  // chamar esta função direto não escapar dela.
+  if (ehSilencio(pedidoBruto)) return { ok: true, texto: "" };
+
   try {
     const atual = await comTokenValido(user, leVolumeAtual);
 
     const pedido = interpretaVolume(pedidoBruto, atual);
-    if (pedido.erro === "vazio") {
+    if (pedido.mostrar) {
       return { ok: true, texto: linhaDoVolumeAtual(atual) };
     }
     if (pedido.erro) {
@@ -1397,6 +1402,13 @@ app.get("/volume/:commandId", async (req, res) => {
     return res.send("Comando não configurado. O streamer precisa conferir o link do !volume.");
   }
 
+  // Silêncio ANTES do banco, pela mesma razão que o segredo: um "!vol" sem
+  // argumento não deveria custar uma conexão para depois não dizer nada — e é
+  // o caso mais comum, porque é assim que o pedido chega quando ninguém
+  // digitou número. Quem quer o valor pede "!vol atual".
+  const pedido = req.query.v ?? req.query.volume;
+  if (ehSilencio(pedido)) return res.send("");
+
   try {
     await ensureDB(); // esta rota pula o middleware do banco: ver autenticaAntesDoBanco
   } catch {
@@ -1408,7 +1420,7 @@ app.get("/volume/:commandId", async (req, res) => {
     return res.send("Não achei essa conta do Spotify. O streamer precisa autorizar em asrus.app/spotify.");
   }
 
-  const r = await ajustaVolume(user, req.query.v ?? req.query.volume);
+  const r = await ajustaVolume(user, pedido);
   return res.send(r.ok ? r.texto : r.mensagem);
 });
 

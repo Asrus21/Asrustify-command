@@ -145,22 +145,47 @@ para configurar e esquecer. A consequência está aqui escrita: quem vazar o lin
 do `!sr` também mexe no volume.
 
 ```
-GET /volume/:commandId?k=<SR_SECRET>          → diz o volume atual
+GET /volume/:commandId?k=<SR_SECRET>&v=atual  → diz o volume atual
 GET /volume/:commandId?k=<SR_SECRET>&v=50     → põe em 50
 GET /volume/:commandId?k=<SR_SECRET>&v=%2B10  → soma 10 ao atual (+10 na URL)
 GET /volume/:commandId?k=<SR_SECRET>&v=-10    → tira 10 do atual
+GET /volume/:commandId?k=<SR_SECRET>          → não responde nada
 ```
 
 Texto puro e sempre 200, pelo mesmo motivo do `!sr`.
 
 | O chat digita | O que acontece |
 | --- | --- |
-| `!volume` | responde o volume atual |
-| `!volume 50` | põe em 50% |
+| `!volume` | **nada** — o chat fica quieto |
+| `!volume atual` | responde o volume atual |
+| `!volume 50` | põe em 50 |
 | `!volume +10` / `!volume -10` | mexe a partir do atual |
 | `!volume 0` | mudo |
 | `!volume 150` | recusa, dizendo que a faixa é 0 a 100 |
 | `!volume -20` com o volume em 5 | vira 0, não recusa |
+| qualquer outro texto | **nada** |
+
+### Por que "atual" por extenso, e não o campo vazio
+
+Porque **campo vazio não existe**. Um `!volume` sem argumento não chega aqui
+vazio: chega como o que o parser do bot resolver. Em produção vieram `$(1)`,
+depois `(1)` sem o cifrão, e uma terceira forma que não foi identificada nem
+chamando a rota com dez candidatos. Não dá para enumerar o que um parser de
+terceiro faz.
+
+Com uma palavra explícita, a pergunta deixa de ser "o que o bot mandou quando
+ninguém digitou nada" e passa a ser "digitaram `atual`?". Tudo que não é
+`atual` nem número cai no silêncio junto — e nenhuma forma nova de placeholder
+volta a quebrar isto.
+
+O silêncio é conferido **antes do banco**, pela mesma razão que o segredo: um
+`!volume` sozinho não deveria custar uma conexão para depois não dizer nada, e
+é o caso mais comum.
+
+Também valem `agora` e `status`. **Não** vale `0`: no `!clip` o zero serve de
+sentinela porque 0 segundos nunca foi duração válida, mas aqui `0` é um volume
+de verdade — o mudo. Um `&v=$(1|0)` no comando do bot mutaria o Spotify a cada
+`!volume` sem argumento.
 
 **Absoluto fora da faixa é recusado; relativo é limitado.** Quem digita
 `!volume 150` quis dizer um número e errou — aceitar calado como 100 esconde o
@@ -171,9 +196,13 @@ que ela não tinha.
 Configuração no bot:
 
 - **StreamElements** — resposta do comando `!volume`:
-  `${customapi.https://asrus.app/spotify/volume/<command_id>?k=<SR_SECRET>&v=${queryescape ${1:}}}`
+  `$(customapi.https://asrus.app/spotify/volume/<command_id>?k=<SR_SECRET>&v=$(1))`
 - **Nightbot** — resposta do comando `!volume`:
-  `$(urlfetch https://asrus.app/spotify/volume/<command_id>?k=<SR_SECRET>&v=$(querystring))`
+  `$(urlfetch https://asrus.app/spotify/volume/<command_id>?k=<SR_SECRET>&v=$(1))`
+
+Aqui `$(1)` basta, sem `queryescape`: volume é uma palavra só, sem espaço nem
+acento. E não precisa de valor padrão — o que o bot mandar quando ninguém
+digitar nada cai no silêncio.
 
 ### O que o Spotify exige aqui
 
