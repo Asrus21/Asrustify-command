@@ -172,13 +172,22 @@ function explicaErroDoVolume(status, mensagemDoSpotify) {
   };
 }
 
-/** A linha que vai ao chat quando dá certo. */
+/**
+ * A linha que vai ao chat quando dá certo.
+ *
+ * SEM emoji, e isso não é gosto. Toda mensagem que chegou ao chat nos testes
+ * era ASCII puro (as recusas); toda mensagem que começaria com emoji não
+ * apareceu — resposta vazia no chat, com a rota devolvendo o texto completo,
+ * 200 e text/plain. Emoji é fora do BMP (4 bytes em UTF-8, par substituto em
+ * UTF-16), e alguma coisa no caminho até o chat não aguenta. Não custa nada
+ * escrever sem, e custa o comando inteiro insistir.
+ */
 function linhaDoVolume(alvo, antes) {
-  if (alvo === VOLUME_MIN) return '🔇 Volume no mudo.';
+  if (alvo === VOLUME_MIN) return 'Volume no mudo (0%).';
   // Mostrar o "de → para" só quando o pedido foi relativo: em "!volume 50" a
   // pessoa já sabe o alvo, e repetir de onde veio gasta linha de chat.
   const de = typeof antes === 'number' && Number.isFinite(antes) ? `${Math.round(antes)}% → ` : '';
-  return `🔊 Volume: ${de}${alvo}%`;
+  return `Volume: ${de}${alvo}%`;
 }
 
 /** A linha de quando ninguém pediu valor: só informar. */
@@ -188,8 +197,8 @@ function linhaDoVolumeAtual(atual) {
   }
   const n = Math.round(atual);
   return n === VOLUME_MIN
-    ? '🔇 O volume está no mudo. Use !volume 50 para mudar.'
-    : `🔊 Volume atual: ${n}%. Use !volume 50 para mudar.`;
+    ? 'O volume está no mudo. Use !volume 50 para mudar.'
+    : `Volume atual: ${n}%. Use !volume 50 para mudar.`;
 }
 
 module.exports = {
