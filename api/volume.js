@@ -31,15 +31,18 @@ function interpretaVolume(bruto, atual) {
   const cru = String(bruto ?? '').trim();
   if (!cru) return { erro: 'vazio' };
 
-  // O placeholder é conferido ANTES de normalizar, porque a normalização tira
-  // o "%" do fim: "%1%" viraria "%1" e deixaria de ser reconhecido.
-  //
   // Bot de chat não manda campo vazio quando o comando roda sem argumento:
-  // manda o texto do próprio placeholder. Um "!vol" sozinho chega aqui como
-  // "$(1)", e tratar isso como lixo faria o comando ensinar a sintaxe quando a
-  // pessoa só queria saber o volume atual. É a mesma forma, então é o mesmo
-  // caso: ninguém escreveu nada.
-  if (/\$\{|\$\(|\$\d|%\d+%|\{\{/.test(cru)) return { erro: 'vazio' };
+  // manda o texto do próprio placeholder. Um "!vol" sozinho chega aqui assim,
+  // e tratar isso como lixo faria o comando ensinar a sintaxe quando a pessoa
+  // só queria saber o volume atual. É o mesmo caso: ninguém escreveu nada.
+  //
+  // A checagem é por CARACTERE, não pelas formas conhecidas. A primeira versão
+  // listava `$(`, `${`, `%1%`, `{{` — e em produção o StreamElements mandou
+  // "(1)", sem o cifrão, que não casava com nenhuma delas. Aqui dá para ser
+  // grosseiro sem perder nada: volume é número, e número não tem parêntese,
+  // chave, colchete nem cifrão. O "%" do fim sai antes porque "50%" é uma
+  // forma legítima de escrever.
+  if (/[$(){}\[\]%]/.test(cru.replace(/%$/, ''))) return { erro: 'vazio' };
 
   // "50%" e "49,6" são formas normais de escrever. Um "%" sozinho sobra vazio,
   // e vazio já quer dizer "só me diga o volume atual".
