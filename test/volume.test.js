@@ -80,16 +80,33 @@ ok('placeholder do bot não substituído = "nada escrito", não lixo', () => {
 });
 
 console.log('a linha do chat');
-ok('absoluto não mostra de onde veio', () => assert.equal(linhaDoVolume(50), '🔊 Volume: 50%'));
-ok('relativo mostra o de → para', () => assert.equal(linhaDoVolume(40, 30), '🔊 Volume: 30% → 40%'));
+ok('absoluto não mostra de onde veio', () => assert.equal(linhaDoVolume(50), 'Volume: 50%'));
+ok('relativo mostra o de → para', () => assert.equal(linhaDoVolume(40, 30), 'Volume: 30% → 40%'));
 ok('zero é mudo', () => {
-  assert.equal(linhaDoVolume(0), '🔇 Volume no mudo.');
-  assert.equal(linhaDoVolume(0, 30), '🔇 Volume no mudo.');
+  assert.equal(linhaDoVolume(0), 'Volume no mudo (0%).');
+  assert.equal(linhaDoVolume(0, 30), 'Volume no mudo (0%).');
 });
 ok('só informar', () => {
-  assert.equal(linhaDoVolumeAtual(55), '🔊 Volume atual: 55%. Use !volume 50 para mudar.');
+  assert.equal(linhaDoVolumeAtual(55), 'Volume atual: 55%. Use !volume 50 para mudar.');
   assert.match(linhaDoVolumeAtual(0), /mudo/);
   assert.match(linhaDoVolumeAtual(null), /Abra o Spotify/);
+});
+
+ok('nenhuma linha do chat tem caractere fora do BMP', () => {
+  // Emoji é par substituto em UTF-16, e foi o que sumiu no caminho até o chat:
+  // a rota devolvia o texto inteiro e o chat não mostrava nada.
+  const foraDoBMP = /[\u{10000}-\u{10FFFF}]/u;
+  const linhas = [
+    linhaDoVolume(50), linhaDoVolume(40, 30), linhaDoVolume(0), linhaDoVolume(0, 30),
+    linhaDoVolumeAtual(55), linhaDoVolumeAtual(0), linhaDoVolumeAtual(null),
+    ...[404, 401, 429, 403, 400].map((st) => explicaErroDoVolume(st, 'x').mensagem),
+    interpretaVolume('abc', 30).mensagem,
+    interpretaVolume('150', 30).mensagem,
+    interpretaVolume('+1', null).mensagem,
+  ];
+  for (const l of linhas) {
+    assert.ok(!foraDoBMP.test(String(l)), `tem emoji: ${JSON.stringify(l)}`);
+  }
 });
 
 console.log('traduzir a recusa do Spotify');
