@@ -5,7 +5,7 @@
   "main": "api/index.js",
   "scripts": {
     "dev": "node -e \"require('./api/index.js').listen(3000, () => console.log('http://localhost:3000'))\"",
-    "test": "node test/fila.test.js && node test/acesso.test.js"
+    "test": "node test/fila.test.js && node test/acesso.test.js && node test/volume.test.js"
   },
   "engines": {
     "node": ">=18.0.0"
