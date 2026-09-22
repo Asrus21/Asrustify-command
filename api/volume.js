@@ -171,19 +171,34 @@ function explicaErroDoVolume(status, mensagemDoSpotify) {
 /**
  * A linha que vai ao chat quando dá certo.
  *
- * SEM emoji, e isso não é gosto. Toda mensagem que chegou ao chat nos testes
- * era ASCII puro (as recusas); toda mensagem que começaria com emoji não
- * apareceu — resposta vazia no chat, com a rota devolvendo o texto completo,
- * 200 e text/plain. Emoji é fora do BMP (4 bytes em UTF-8, par substituto em
- * UTF-16), e alguma coisa no caminho até o chat não aguenta. Não custa nada
- * escrever sem, e custa o comando inteiro insistir.
+ * SEM "%" e sem emoji, e isso não é gosto.
+ *
+ * O comando devolvia resposta vazia no chat com a rota entregando o texto
+ * completo, 200 e text/plain — conferido chamando a produção. Cruzando tudo
+ * que apareceu e tudo que não apareceu:
+ *
+ *   apareceu:  "Diga o volume em número: !volume 50 (ou !volume +10 ...)"
+ *              "O Spotify recusou: Player command failed: Cannot control ..."
+ *              (e todas as linhas do !clip e do !duo)
+ *   sumiu:     "🔊 Volume atual: 32%. Use !volume 50 para mudar."
+ *              "Volume atual: 32%. Use !volume 50 para mudar."
+ *
+ * Tirar o emoji não resolveu — testado no chat de verdade. O que resta em
+ * comum entre as duas que sumiram, e não existe em nenhuma que apareceu, é o
+ * "%". Faz sentido: "%" é escape de URL e delimitador de variável em vários
+ * bots, e um "%" seguido de coisa que não é hexadecimal derruba quem tenta
+ * decodificar. Acento continua (as que apareceram têm), então não é encoding
+ * em geral: é esse caractere.
+ *
+ * O número sem "%" não perde nada — "Volume atual: 32" diz o mesmo. Na
+ * ENTRADA o "%" continua aceito: "!volume 50%" funciona.
  */
 function linhaDoVolume(alvo, antes) {
-  if (alvo === VOLUME_MIN) return 'Volume no mudo (0%).';
+  if (alvo === VOLUME_MIN) return 'Volume no mudo.';
   // Mostrar o "de → para" só quando o pedido foi relativo: em "!volume 50" a
   // pessoa já sabe o alvo, e repetir de onde veio gasta linha de chat.
-  const de = typeof antes === 'number' && Number.isFinite(antes) ? `${Math.round(antes)}% → ` : '';
-  return `Volume: ${de}${alvo}%`;
+  const de = typeof antes === 'number' && Number.isFinite(antes) ? `${Math.round(antes)} -> ` : '';
+  return `Volume: ${de}${alvo}`;
 }
 
 /** A linha de quando ninguém pediu valor: só informar. */
@@ -194,7 +209,7 @@ function linhaDoVolumeAtual(atual) {
   const n = Math.round(atual);
   return n === VOLUME_MIN
     ? 'O volume está no mudo. Use !volume 50 para mudar.'
-    : `Volume atual: ${n}%. Use !volume 50 para mudar.`;
+    : `Volume atual: ${n}. Use !volume 50 para mudar.`;
 }
 
 module.exports = {
