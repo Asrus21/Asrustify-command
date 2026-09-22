@@ -27,34 +27,49 @@ const VOLUME_MAX = 100;
  * `atual` só é necessário no relativo. Sem ele, o relativo não dá para
  * resolver e a recusa diz isso em vez de chutar um valor.
  */
-function interpretaVolume(bruto, atual) {
+/**
+ * Palavras que PEDEM o volume atual.
+ *
+ * Existe porque o caminho contrário não funciona: "!vol" sem argumento não
+ * chega aqui como campo vazio, chega como o que o parser do bot resolver —
+ * "$(1)", depois "(1)" sem o cifrão, e uma terceira forma que nem identifiquei.
+ * Tentar reconhecer isso custou três rodadas em produção.
+ *
+ * Com uma palavra explícita, a pergunta deixa de ser "o que o bot mandou
+ * quando ninguém digitou nada" e passa a ser "digitaram 'atual'?". O que o bot
+ * inventa cai no silêncio junto com todo o resto que não é número, e nenhuma
+ * forma nova de placeholder volta a quebrar isto.
+ */
+const PEDIR_ATUAL = ['atual', 'agora', 'status'];
+
+/** Pediram o volume atual por extenso? */
+function querVolumeAtual(bruto) {
+  return PEDIR_ATUAL.includes(String(bruto ?? '').trim().toLowerCase());
+}
+
+/**
+ * Não dá para fazer nada com isto, e a resposta é NÃO RESPONDER.
+ *
+ * Campo vazio, o placeholder que o bot mandou sozinho, ou texto que não é
+ * número: nos três a saída é a mesma, o chat fica quieto. É o que faz "!vol"
+ * sozinho não poluir o chat sem precisarmos saber o que o bot manda.
+ */
+function ehSilencio(bruto) {
   const cru = String(bruto ?? '').trim();
-  if (!cru) return { erro: 'vazio' };
+  if (!cru) return true;
+  if (querVolumeAtual(cru)) return false;
+  const limpo = cru.replace(',', '.').replace(/%$/, '');
+  return !limpo || !Number.isFinite(Number(limpo));
+}
+
+function interpretaVolume(bruto, atual) {
+  if (querVolumeAtual(bruto)) return { mostrar: true };
+  if (ehSilencio(bruto)) return { erro: 'silencio' };
 
   // "50%" e "49,6" são formas normais de escrever.
-  const limpo = cru.replace(',', '.').replace(/%$/, '');
-  if (!limpo) return { erro: 'vazio' };
-
+  const limpo = String(bruto).trim().replace(',', '.').replace(/%$/, '');
   const relativo = /^[+-]/.test(limpo);
   const n = Number(limpo);
-
-  // O que NÃO É NÚMERO vira "me diga o volume atual", e não uma recusa.
-  //
-  // Isto começou como tentativa de reconhecer o placeholder do bot para
-  // distinguir "não escreveram nada" de "escreveram errado". Custou três
-  // rodadas em produção: primeiro veio "$(1)", depois "(1)" sem o cifrão, e
-  // depois uma terceira forma que eu não consegui identificar. É o parser do
-  // StreamElements que decide, não nós, e não dá para enumerar o que ele faz.
-  //
-  // Então a regra deixa de depender disso. Num texto que não é número não há o
-  // que fazer de qualquer jeito, e a resposta do volume atual já carrega a
-  // sintaxe — "Volume atual: 32%. Use !volume 50 para mudar." — então nem a
-  // pessoa que digitou errado fica sem a correção. Nenhuma forma nova de
-  // placeholder volta a quebrar isto.
-  //
-  // Número fora da faixa continua sendo RECUSADO (ver abaixo): ali a pessoa
-  // disse um número, e o que ela precisa ouvir é que ele não serve.
-  if (!Number.isFinite(n)) return { erro: 'vazio' };
 
   // O Spotify só aceita inteiro.
   const passo = Math.round(n);
@@ -215,6 +230,9 @@ function linhaDoVolumeAtual(atual) {
 module.exports = {
   VOLUME_MIN,
   VOLUME_MAX,
+  PEDIR_ATUAL,
+  querVolumeAtual,
+  ehSilencio,
   interpretaVolume,
   explicaErroDoVolume,
   linhaDoVolume,

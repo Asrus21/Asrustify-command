@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const {
   VOLUME_MIN,
   VOLUME_MAX,
+  querVolumeAtual,
+  ehSilencio,
   interpretaVolume,
   explicaErroDoVolume,
   linhaDoVolume,
@@ -25,14 +27,12 @@ ok('decimal é arredondado (o Spotify só aceita inteiro)', () => {
 ok('0 é mudo, não "nada escrito"', () => assert.deepEqual(interpretaVolume('0', 30), { alvo: 0, relativo: false }));
 ok('e por isso 0 NUNCA pode virar sentinela de "sem argumento"', () => {
   // No !clip o "0" serve de sentinela porque 0 segundos nunca foi duração
-  // válida. Aqui 0 é um volume de verdade: o mudo. Se alguém puser
-  // &v=$(1|0) no comando do bot, todo "!vol" sem argumento muta o Spotify.
-  // O par abaixo é a diferença, e é ela que segura essa tentação:
+  // válida. Aqui 0 é um volume de verdade: o mudo. Um &v=$(1|0) no comando do
+  // bot mutaria o Spotify a cada "!vol" sem argumento — foi por isso que o
+  // caminho escolhido foi a palavra "atual", e não um número mágico.
   assert.equal(interpretaVolume('0', 30).alvo, 0, '0 sem aspas tem que mutar');
-  assert.equal(interpretaVolume("'0'", 30).erro, 'vazio', "'0' com aspas não é número");
-  assert.equal(interpretaVolume('"0"', 30).erro, 'vazio', '"0" com aspas não é número');
-  // Um padrão seguro é qualquer palavra: nenhuma delas é volume.
-  assert.equal(interpretaVolume('atual', 30).erro, 'vazio');
+  assert.equal(interpretaVolume("'0'", 30).erro, 'silencio', "'0' com aspas não é número");
+  assert.equal(interpretaVolume('"0"', 30).erro, 'silencio', '"0" com aspas não é número');
 });
 ok('100 vale', () => assert.equal(interpretaVolume('100', 30).alvo, 100));
 
@@ -68,27 +68,37 @@ ok('+0 e -0 não mudam nada', () => {
 });
 
 console.log('nada escrito e lixo');
-ok('vazio pede para informar, não é erro', () => {
-  for (const v of ['', '   ', null, undefined]) assert.equal(interpretaVolume(v, 30).erro, 'vazio');
-});
-ok('o que NÃO é número vira "me diga o volume atual"', () => {
-  // Não é preguiça: é a decisão de parar de adivinhar o placeholder do bot.
-  // Em produção vieram "$(1)", depois "(1)" sem cifrão, e uma terceira forma
-  // que não identifiquei. Num texto que não é número não há o que fazer de
-  // qualquer jeito, e a resposta do volume atual já carrega a sintaxe.
-  const naoNumericos = [
-    '%', 'alto', 'abc', 'cinquenta', '++', '--', 'mais', '+', '-', '.', 'vol',
-    // formas de placeholder, com e sem cifrão, vistas ou possíveis
+ok('o que não é número NÃO RESPONDE NADA', () => {
+  // "!vol" sozinho não chega como campo vazio: chega como o que o parser do
+  // bot resolver — "$(1)", "(1)" sem cifrão, e uma terceira forma que nem
+  // identifiquei. Tentar reconhecer isso custou três rodadas em produção.
+  // Com o silêncio, o que o bot inventa cai junto com o resto e a pergunta
+  // deixa de existir.
+  const silenciosos = [
+    '', '   ', null, undefined, '%', 'alto', 'abc', 'cinquenta', '++', '--',
+    'mais', '+', '-', '.', 'vol',
     '$(1)', '${1:}', '$(querystring)', '%1%', '{{1}}', '$1',
     '(1)', '(1:)', '{1}', '[1]', 'querystring', '1:', '$(1',
   ];
-  for (const v of naoNumericos) {
-    assert.equal(interpretaVolume(v, 30).erro, 'vazio', `${v} deveria virar vazio`);
+  for (const v of silenciosos) {
+    assert.equal(ehSilencio(v), true, `${v} deveria ser silêncio`);
+    assert.equal(interpretaVolume(v, 30).erro, 'silencio', `${v} deveria ser silêncio`);
   }
 });
-ok('e essa resposta ensina a sintaxe sozinha', () =>
-  assert.match(linhaDoVolumeAtual(32), /Use !volume 50 para mudar/));
-ok('mas NÚMERO fora da faixa continua sendo recusado', () => {
+ok('"atual" (e sinônimos) é o que PEDE o volume', () => {
+  for (const v of ['atual', 'ATUAL', ' Atual ', 'agora', 'status']) {
+    assert.equal(querVolumeAtual(v), true, `${v} deveria pedir o atual`);
+    assert.equal(ehSilencio(v), false);
+    assert.deepEqual(interpretaVolume(v, 30), { mostrar: true });
+  }
+});
+ok('número não é silêncio nem pedido de atual', () => {
+  for (const v of ['0', '30', '100', '+10', '-10', '50%', '49,6']) {
+    assert.equal(ehSilencio(v), false, `${v} é número`);
+    assert.equal(querVolumeAtual(v), false);
+  }
+});
+ok('NÚMERO fora da faixa continua sendo recusado, não silenciado', () => {
   // Aqui a pessoa disse um número: o que ela precisa ouvir é que não serve.
   for (const v of ['101', '150', '999']) {
     const r = interpretaVolume(v, 30);
