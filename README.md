@@ -34,7 +34,7 @@ Navegador -> https://asrus.app/spotify/<rota>
 | `BASE_URL` | `https://asrus.app/spotify` (sem barra final) |
 | `DATABASE_URL` | Injetada automaticamente ao conectar o Neon pela aba **Storage** |
 | `FILA_SECRET` | Segredo compartilhado com quem chama `POST /api/fila/:commandId`. Sem ele, a rota nega tudo — ela **modifica** o player. |
-| `SR_SECRET` | Segredo do comando `!sr` (`GET /sr/:commandId`). Separado do `FILA_SECRET` de propósito: este viaja na URL do comando do bot. Sem ele, a rota nega tudo. |
+| `SR_SECRET` | Segredo dos comandos de chat: `!sr` (`GET /sr/:commandId`) e `!volume` (`GET /volume/:commandId`). Separado do `FILA_SECRET` de propósito: este viaja na URL do comando do bot. Sem ele, as rotas negam tudo. |
 | `PEDIDOS_USER` / `PEDIDOS_PASS` | Basic Auth da página `/pedidos`. Sem os dois, ela nega tudo — mostra e-mail de quem pediu acesso. |
 | `LIMITE_CONTAS` | Quantas contas o Development Mode aceita (padrão 5). Só alimenta o contador do painel — quem manda é o dashboard. |
 
@@ -136,6 +136,57 @@ Configuração no bot (o `<command_id>` é o mesmo do `/musica`):
 O `queryescape`/`querystring` é obrigatório: sem ele, um pedido com espaço ou
 acento chega cortado.
 
+## Comando `!volume` (`GET /volume/:commandId`)
+
+Ajusta o volume do Spotify pelo chat. Usa o **mesmo `SR_SECRET`** do `!sr`: é a
+mesma classe de coisa — comando de chat cujo segredo viaja na URL, salvo no
+painel do bot — e a mesma exposição. Um segredo a mais seria mais uma coisa
+para configurar e esquecer. A consequência está aqui escrita: quem vazar o link
+do `!sr` também mexe no volume.
+
+```
+GET /volume/:commandId?k=<SR_SECRET>          → diz o volume atual
+GET /volume/:commandId?k=<SR_SECRET>&v=50     → põe em 50
+GET /volume/:commandId?k=<SR_SECRET>&v=%2B10  → soma 10 ao atual (+10 na URL)
+GET /volume/:commandId?k=<SR_SECRET>&v=-10    → tira 10 do atual
+```
+
+Texto puro e sempre 200, pelo mesmo motivo do `!sr`.
+
+| O chat digita | O que acontece |
+| --- | --- |
+| `!volume` | responde o volume atual |
+| `!volume 50` | põe em 50% |
+| `!volume +10` / `!volume -10` | mexe a partir do atual |
+| `!volume 0` | mudo |
+| `!volume 150` | recusa, dizendo que a faixa é 0 a 100 |
+| `!volume -20` com o volume em 5 | vira 0, não recusa |
+
+**Absoluto fora da faixa é recusado; relativo é limitado.** Quem digita
+`!volume 150` quis dizer um número e errou — aceitar calado como 100 esconde o
+erro. Já `-20` com o volume em 5 quer dizer "abaixa tudo": a pessoa não tem como
+saber o valor atual antes de pedir, então recusar cobraria dela uma informação
+que ela não tinha.
+
+Configuração no bot:
+
+- **StreamElements** — resposta do comando `!volume`:
+  `${customapi.https://asrus.app/spotify/volume/<command_id>?k=<SR_SECRET>&v=${queryescape ${1:}}}`
+- **Nightbot** — resposta do comando `!volume`:
+  `$(urlfetch https://asrus.app/spotify/volume/<command_id>?k=<SR_SECRET>&v=$(querystring))`
+
+### O que o Spotify exige aqui
+
+Além de **Premium** e de um **dispositivo tocando** (os mesmos da fila), este
+comando tem uma recusa que a fila não tem: **dispositivo sem controle de
+volume**. Vários alto-falantes Connect, a maioria das TVs e o player do
+navegador recusam mudar o volume por API mesmo tocando e com Premium — ali o
+volume é do aparelho, não da sessão. A resposta diz isso em vez de mandar
+conferir a assinatura, que está certa.
+
+O escopo necessário (`user-modify-playback-state`) já é pedido desde a fila,
+então quem autorizou para o `!sr` não precisa reautorizar.
+
 ## Pedido de acesso (Development Mode)
 
 Em Development Mode o Spotify **barra quem não está no User Management antes de
@@ -177,8 +228,9 @@ npm test
 ```
 
 Exercita a lógica pura de `api/fila.js` (interpretação do pedido e tradução dos
-erros do Spotify) e de `api/acesso.js` (validação do formulário e o escape que
-protege a página de pedidos) — sem Express, sem banco e sem rede.
+erros do Spotify), `api/acesso.js` (validação do formulário e o escape que
+protege a página de pedidos) e `api/volume.js` (absoluto x relativo, a faixa e a
+tradução das recusas) — sem Express, sem banco e sem rede.
 
 ## Rodar localmente
 

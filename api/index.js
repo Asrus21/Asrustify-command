@@ -31,6 +31,12 @@ const {
   explicaErroDaFila,
   linhaDaFila,
 } = require("./fila");
+const {
+  interpretaVolume,
+  explicaErroDoVolume,
+  linhaDoVolume,
+  linhaDoVolumeAtual,
+} = require("./volume");
 
 // ─── Formato padrao do comando ────────────────────────────────────────────────
 const DEFAULT_FORMAT = "Tocando agora: {nome} - {artista} | {link}";
@@ -322,6 +328,7 @@ function autenticaAntesDoBanco(caminho) {
   return (
     caminho.startsWith("/api/fila/") ||
     caminho.startsWith("/sr/") ||
+    caminho.startsWith("/volume/") ||
     caminho.startsWith("/pedidos")
   );
 }
@@ -1295,6 +1302,113 @@ app.get("/sr/:commandId", async (req, res) => {
   }
 
   const r = await enfileiraPedido(user, pedido);
+  return res.send(r.ok ? r.texto : r.mensagem);
+});
+
+// ─── Volume ──────────────────────────────────────────────────────────────────
+//
+// GET /volume/:commandId?k=SEGREDO        → diz o volume atual
+// GET /volume/:commandId?k=SEGREDO&v=50   → põe em 50
+// GET /volume/:commandId?k=SEGREDO&v=%2B10 → soma 10 ao atual
+//
+// Usa o MESMO segredo do !sr, e não um novo: é a mesma classe de coisa (um
+// comando de chat cujo segredo viaja na URL, salvo no painel do bot) e a mesma
+// exposição. Um env var a mais seria mais uma coisa para configurar e esquecer.
+// A consequência está escrita: quem vazar o link do !sr também mexe no volume.
+
+/** Volume do dispositivo ativo, ou null quando não há nada tocando. */
+async function leVolumeAtual(token) {
+  const res = await axios.get("https://api.spotify.com/v1/me/player", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  // 204 sem corpo = Spotify fechado. Não é erro aqui: o volume relativo é que
+  // depende disto, e quem decide o que dizer é o interpretaVolume.
+  const v = res.data?.device?.volume_percent;
+  return Number.isFinite(v) ? v : null;
+}
+
+async function poeVolume(token, alvo) {
+  await axios.put("https://api.spotify.com/v1/me/player/volume", null, {
+    params: { volume_percent: alvo },
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+/**
+ * Roda `fn` com o token do usuário e, num 401, renova e tenta de novo.
+ * Mesmo padrão do enfileiraPedido — o token de hora em hora expira no meio de
+ * uma live, e a pessoa não deveria ver isso.
+ */
+async function comTokenValido(user, fn) {
+  try {
+    return await fn(user.access_token);
+  } catch (err) {
+    if (err.response?.status !== 401) throw err;
+    const novo = await refreshAccessToken(user.spotify_id, user.refresh_token);
+    return await fn(novo);
+  }
+}
+
+async function ajustaVolume(user, pedidoBruto) {
+  try {
+    const atual = await comTokenValido(user, leVolumeAtual);
+
+    const pedido = interpretaVolume(pedidoBruto, atual);
+    if (pedido.erro === "vazio") {
+      return { ok: true, texto: linhaDoVolumeAtual(atual) };
+    }
+    if (pedido.erro) {
+      return { ok: false, status: 422, motivo: pedido.erro, mensagem: pedido.mensagem };
+    }
+
+    // Já está no valor pedido: não gasta chamada no Spotify para não mudar nada.
+    if (atual === pedido.alvo) {
+      return { ok: true, alvo: pedido.alvo, texto: linhaDoVolume(pedido.alvo) };
+    }
+
+    await comTokenValido(user, (t) => poeVolume(t, pedido.alvo));
+    return {
+      ok: true,
+      alvo: pedido.alvo,
+      antes: atual,
+      // O "de → para" só no relativo: em "!volume 50" a pessoa já sabe o alvo.
+      texto: linhaDoVolume(pedido.alvo, pedido.relativo ? atual : undefined),
+    };
+  } catch (err) {
+    const status = err.response?.status || 0;
+    const msgDoSpotify =
+      err.response?.data?.error?.message || err.response?.data?.error || err.message;
+    const { motivo, mensagem } = explicaErroDoVolume(status, msgDoSpotify);
+    console.error("Falha ao ajustar volume:", status, msgDoSpotify);
+    return {
+      ok: false,
+      status: status >= 400 && status < 500 ? status : 502,
+      motivo,
+      mensagem,
+    };
+  }
+}
+
+app.get("/volume/:commandId", async (req, res) => {
+  res.type("text/plain; charset=utf-8");
+  res.set("Cache-Control", "no-store");
+
+  if (!segredoDoSrConfere(req.query.k)) {
+    return res.send("Comando não configurado. O streamer precisa conferir o link do !volume.");
+  }
+
+  try {
+    await ensureDB(); // esta rota pula o middleware do banco: ver autenticaAntesDoBanco
+  } catch {
+    return res.send("Banco indisponível. Tente daqui a pouco.");
+  }
+
+  const user = await getUserByCommandId(req.params.commandId);
+  if (!user || !user.access_token) {
+    return res.send("Não achei essa conta do Spotify. O streamer precisa autorizar em asrus.app/spotify.");
+  }
+
+  const r = await ajustaVolume(user, req.query.v ?? req.query.volume);
   return res.send(r.ok ? r.texto : r.mensagem);
 });
 
