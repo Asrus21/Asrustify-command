@@ -28,7 +28,22 @@ const VOLUME_MAX = 100;
  * resolver e a recusa diz isso em vez de chutar um valor.
  */
 function interpretaVolume(bruto, atual) {
-  const limpo = String(bruto ?? '').trim().replace(',', '.').replace(/%$/, '');
+  const cru = String(bruto ?? '').trim();
+  if (!cru) return { erro: 'vazio' };
+
+  // O placeholder é conferido ANTES de normalizar, porque a normalização tira
+  // o "%" do fim: "%1%" viraria "%1" e deixaria de ser reconhecido.
+  //
+  // Bot de chat não manda campo vazio quando o comando roda sem argumento:
+  // manda o texto do próprio placeholder. Um "!vol" sozinho chega aqui como
+  // "$(1)", e tratar isso como lixo faria o comando ensinar a sintaxe quando a
+  // pessoa só queria saber o volume atual. É a mesma forma, então é o mesmo
+  // caso: ninguém escreveu nada.
+  if (/\$\{|\$\(|\$\d|%\d+%|\{\{/.test(cru)) return { erro: 'vazio' };
+
+  // "50%" e "49,6" são formas normais de escrever. Um "%" sozinho sobra vazio,
+  // e vazio já quer dizer "só me diga o volume atual".
+  const limpo = cru.replace(',', '.').replace(/%$/, '');
   if (!limpo) return { erro: 'vazio' };
 
   const relativo = /^[+-]/.test(limpo);
@@ -117,7 +132,12 @@ function explicaErroDoVolume(status, mensagemDoSpotify) {
   // "Invalid volume" — que é erro de argumento NOSSO — era traduzido como
   // "este dispositivo não aceita mudar o volume", mandando o streamer trocar
   // de aparelho por causa de um número errado na URL.
+  //
+  // "cannot control" é a frase que ele manda de verdade, vista em produção:
+  // "Player command failed: Cannot control device volume". Sem ela, a recusa
+  // caía no repasse genérico — correto, mas sem dizer o que fazer.
   if (
+    baixa.includes('cannot control') ||
     baixa.includes('volume_control_disallow') ||
     baixa.includes('not supported') ||
     baixa.includes('restriction')
