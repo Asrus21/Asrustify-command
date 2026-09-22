@@ -59,23 +59,29 @@ console.log('nada escrito e lixo');
 ok('vazio pede para informar, não é erro', () => {
   for (const v of ['', '   ', null, undefined]) assert.equal(interpretaVolume(v, 30).erro, 'vazio');
 });
-ok('só o % vira "nada escrito" (o % é removido antes de ler o número)', () =>
-  assert.equal(interpretaVolume('%', 30).erro, 'vazio'));
-ok('texto não numérico ensina o uso', () => {
-  for (const v of ['alto', 'abc', '++', '--', 'mais', '+', '-']) {
-    const r = interpretaVolume(v, 30);
-    assert.equal(r.erro, 'invalido', `${v} deveria ser inválido`);
-    assert.match(r.mensagem, /!volume 50/);
+ok('o que NÃO é número vira "me diga o volume atual"', () => {
+  // Não é preguiça: é a decisão de parar de adivinhar o placeholder do bot.
+  // Em produção vieram "$(1)", depois "(1)" sem cifrão, e uma terceira forma
+  // que não identifiquei. Num texto que não é número não há o que fazer de
+  // qualquer jeito, e a resposta do volume atual já carrega a sintaxe.
+  const naoNumericos = [
+    '%', 'alto', 'abc', 'cinquenta', '++', '--', 'mais', '+', '-', '.', 'vol',
+    // formas de placeholder, com e sem cifrão, vistas ou possíveis
+    '$(1)', '${1:}', '$(querystring)', '%1%', '{{1}}', '$1',
+    '(1)', '(1:)', '{1}', '[1]', 'querystring', '1:', '$(1',
+  ];
+  for (const v of naoNumericos) {
+    assert.equal(interpretaVolume(v, 30).erro, 'vazio', `${v} deveria virar vazio`);
   }
 });
-ok('placeholder do bot não substituído = "nada escrito", não lixo', () => {
-  // "!vol" sozinho chega como "$(1)": a pessoa quer saber o volume atual.
-  for (const v of [
-    '$(1)', '${1:}', '$(querystring)', '%1%', '{{1}}', '$1',
-    // sem o cifrão: foi ISTO que o StreamElements mandou em produção
-    '(1)', '(1:)', '{1}', '[1]', '(querystring)',
-  ]) {
-    assert.equal(interpretaVolume(v, 30).erro, 'vazio', `${v} deveria virar vazio`);
+ok('e essa resposta ensina a sintaxe sozinha', () =>
+  assert.match(linhaDoVolumeAtual(32), /Use !volume 50 para mudar/));
+ok('mas NÚMERO fora da faixa continua sendo recusado', () => {
+  // Aqui a pessoa disse um número: o que ela precisa ouvir é que não serve.
+  for (const v of ['101', '150', '999']) {
+    const r = interpretaVolume(v, 30);
+    assert.equal(r.erro, 'faixa');
+    assert.match(r.mensagem, /de 0 a 100/);
   }
 });
 
